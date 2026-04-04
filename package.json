@@ -63,6 +63,9 @@
   "peerDependenciesMeta": {
     "@aws-sdk/client-dynamodb-streams": {
       "optional": true
+    },
+    "typebox": {
+      "optional": true
     }
   },
   "release": {
