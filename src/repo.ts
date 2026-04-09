@@ -1,63 +1,66 @@
-import type { TSchema } from "typebox";
 import type { Db } from "./db";
 import type { Table } from "./table";
 import type {
   DbTrxGetRequest,
   DbTrxWriteRequest,
   ExtractTableDef,
-  GsiNames,
+  ExtractTableSchema,
+  TableGsiNames,
   Obj,
-  RepoBatchGet,
+  RepoBatchGetOptions,
   RepoBatchGetOrThrowResult,
   RepoBatchGetResult,
   RepoBatchWrite,
   RepoBatchWriteResult,
-  RepoCreate,
+  RepoCreateOptions,
   RepoCreateItem,
   RepoCreateResult,
-  RepoDelete,
+  RepoDeleteOptions,
   RepoDeleteOrThrowResult,
   RepoDeleteResult,
-  RepoExists,
-  RepoGet,
+  RepoExistsOptions,
+  RepoGetOptions,
   RepoGetOrThrowResult,
   RepoGetResult,
   RepoKey,
-  RepoPut,
+  RepoPutOptions,
   RepoPutItem,
   RepoPutResult,
-  RepoQuery,
-  RepoQueryGsi,
+  RepoQueryOptions,
+  RepoQueryGsiOptions,
   RepoQueryGsiPagedResult,
   RepoQueryGsiResult,
   RepoQueryPagedResult,
   RepoQueryResult,
-  RepoScan,
-  RepoScanGsi,
+  RepoScanOptions,
+  RepoScanGsiOptions,
   RepoScanGsiPagedResult,
   RepoScanGsiResult,
   RepoScanPagedResult,
   RepoScanResult,
-  RepoTrxGet,
+  RepoTrxGetOptions,
   RepoTrxGetOrThrowResult,
   RepoTrxGetResult,
   RepoTrxWriteRequest,
-  RepoUpdate,
+  RepoUpdateOptions,
   RepoUpdateData,
   RepoUpdateResult,
-  RepoUpsert,
-  RepoUpsertResult,
+  RepoQueryGsiQuery,
 } from "./types";
 
 // TODO: query/queryGsi needs strongly typed "key" argument
 // allows =,>,>=,<,<=,begins_with, between on sort key
 // util -> extractExclusiveStartKey(item)
 
-export class Repository<T extends Table<any, any>> {
-  readonly table: Table<TSchema, any>;
+export abstract class AbstractRepo<T extends Table> {
+  // these phantom properties are used to pre-compute types derived from T
+  // which allows easy lookups using the "this" AbstractRepo type
+  declare readonly $schema: ExtractTableSchema<T>;
+  declare readonly $def: ExtractTableDef<T>;
+
+  abstract readonly table: T;
   readonly db: Db;
-  constructor(table: T, db: Db) {
-    this.table = table;
+  constructor(db: Db) {
     this.db = db;
   }
 
@@ -65,158 +68,207 @@ export class Repository<T extends Table<any, any>> {
     return `${this.db.config?.tableNamePrefix ?? ""}${this.table.def.name}`;
   }
 
-  get def(): ExtractTableDef<T> {
-    return this.table.def as never;
+  get defaultPutData(): Partial<ExtractTableSchema<T>> {
+    return {};
   }
 
-  extractKey(item: RepoKey<T>): RepoKey<T> {
+  get defaultUpdateData(): Partial<ExtractTableSchema<T>> {
+    return {};
+  }
+
+  transformItem(item: ExtractTableSchema<T>): ExtractTableSchema<T> {
+    return item;
+  }
+
+  private applyTransformsIfNeeded(
+    items: Obj[],
+    options?: { projection?: any[]; gsi?: string },
+  ): any[] {
+    // transforms aren't applied when applying a projection
+    if (options?.projection?.length) return items;
+    if (options?.gsi) {
+      // projections inherited to GSIs also prevent transformation
+      const gsiProj = this.table.def.gsis?.[options.gsi]?.projection;
+      if (gsiProj === "KEYS_ONLY" || Array.isArray(gsiProj)) return items;
+    }
+
+    return items.map((item) => this.transformItem(item as ExtractTableSchema<T>));
+  }
+
+  private applyTransformIfNeeded(item: Obj, options?: { projection?: any[]; gsi?: string }): any {
+    const [transformedItem] = this.applyTransformsIfNeeded([item], options);
+    return transformedItem;
+  }
+
+  // TODO: should this throw if pk is missing?
+  // should return type by narrower?
+  extractKey(item: RepoKey<this>): RepoKey<this> {
     const { partitionKey, sortKey } = this.table.def;
     if (sortKey) {
       return {
-        [partitionKey]: item[partitionKey],
-        [sortKey]: item[sortKey],
-      } as RepoKey<T>;
+        [partitionKey]: item[partitionKey as keyof RepoKey<this>],
+        [sortKey]: item[sortKey as keyof RepoKey<this>],
+      } as RepoKey<this>;
     }
 
-    return { [partitionKey]: item[partitionKey] } as RepoKey<T>;
+    return { [partitionKey]: item[partitionKey as keyof RepoKey<this>] } as RepoKey<this>;
   }
 
-  async get<O extends RepoGet<T>>(key: RepoKey<T>, options?: O): Promise<RepoGetResult<T, O>> {
-    return this.db.get({ table: this.tableName, key: this.extractKey(key), ...options });
-  }
-
-  async getOrThrow<O extends RepoGet<T>>(
-    key: RepoKey<T>,
+  async get<O extends RepoGetOptions<this>>(
+    key: RepoKey<this>,
     options?: O,
-  ): Promise<RepoGetOrThrowResult<T, O>> {
-    return this.db.getOrThrow({ table: this.tableName, key: this.extractKey(key), ...options });
+  ): Promise<RepoGetResult<this, O>> {
+    const item = await this.db.get({
+      table: this.tableName,
+      key: this.extractKey(key),
+      ...options,
+    });
+    return item && this.applyTransformIfNeeded(item, options);
   }
 
-  async put<O extends RepoPut<T>>(item: RepoPutItem<T>, options?: O): Promise<RepoPutResult<T, O>> {
-    const itemWithDefaults = this.table.def.beforePut
-      ? { ...this.table.def.beforePut(item), ...item }
-      : item;
-    return this.db.put({ table: this.tableName, item: itemWithDefaults, ...options });
-  }
-
-  async update<O extends RepoUpdate<T>>(
-    key: RepoKey<T>,
-    update: RepoUpdateData<T>,
+  async getOrThrow<O extends RepoGetOptions<this>>(
+    key: RepoKey<this>,
     options?: O,
-  ): Promise<RepoUpdateResult<T, O>> {
-    const updateWithDefaults = this.table.def.beforeUpdate
-      ? { ...this.table.def.beforeUpdate(update), ...update }
-      : update;
-    return this.db.update({
+  ): Promise<RepoGetOrThrowResult<this, O>> {
+    const item = await this.db.getOrThrow({
+      table: this.tableName,
+      key: this.extractKey(key),
+      ...options,
+    });
+    return this.applyTransformIfNeeded(item, options);
+  }
+
+  async put(item: RepoPutItem<this>, options?: RepoPutOptions): Promise<RepoPutResult<this>> {
+    const itemWithDefaults = { ...this.defaultPutData, ...item };
+    const result = await this.db.put({ table: this.tableName, item: itemWithDefaults, ...options });
+    return this.applyTransformIfNeeded(result);
+  }
+
+  async update(
+    key: RepoKey<this>,
+    update: RepoUpdateData,
+    options?: RepoUpdateOptions,
+  ): Promise<RepoUpdateResult<this>> {
+    const updateWithDefaults = { ...this.defaultUpdateData, ...update };
+    const result = await this.db.update({
       table: this.tableName,
       key: this.extractKey(key),
       update: updateWithDefaults,
       ...options,
-    }) as RepoUpdateResult<T, O>;
-  }
-
-  async create<O extends RepoCreate<T>>(
-    item: RepoCreateItem<T>,
-    options?: O,
-  ): Promise<RepoCreateResult<T, O>> {
-    const itemWithDefaults = this.table.def.beforePut
-      ? { ...this.table.def.beforePut(item), ...item }
-      : item;
-    return this.db.create({
-      table: this.tableName,
-      item: itemWithDefaults,
-      partitionKeyName: this.table.def.partitionKey,
-      ...options,
     });
+    return this.applyTransformIfNeeded(result);
   }
 
-  async upsert(data: RepoUpsert<T>): Promise<RepoUpsertResult<T>> {
-    const { update, item, key, ...options } = data;
-    const updateWithDefaults = this.table.def.beforeUpdate
-      ? { ...this.table.def.beforeUpdate(update), ...update }
-      : update;
-    const itemWithDefaults = this.table.def.beforePut
-      ? { ...this.table.def.beforePut(item), ...item }
-      : item;
-    return this.db.upsert({
+  async create(
+    item: RepoPutItem<this>,
+    options?: RepoCreateOptions,
+  ): Promise<RepoCreateResult<this>> {
+    const { condition: otherCondition, ...otherOptions } = options ?? {};
+
+    const condition = { $and: [{ [this.table.def.partitionKey]: { $exists: false } }] };
+
+    if (otherCondition) {
+      condition.$and.push(otherCondition);
+    }
+
+    return this.put(item, { condition, ...otherOptions });
+  }
+
+  async delete(key: RepoKey<this>, options?: RepoDeleteOptions): Promise<RepoDeleteResult<this>> {
+    const item = await this.db.delete({
       table: this.tableName,
       key: this.extractKey(key),
-      update: updateWithDefaults,
-      item: itemWithDefaults,
       ...options,
     });
-  }
-
-  async delete(key: RepoKey<T>, options?: RepoDelete<T>): Promise<RepoDeleteResult<T>> {
-    return this.db.delete({ table: this.tableName, key: this.extractKey(key), ...options });
+    return item && this.applyTransformIfNeeded(item);
   }
 
   async deleteOrThrow(
-    key: RepoKey<T>,
-    options?: Omit<RepoDelete<T>, "return">,
-  ): Promise<RepoDeleteOrThrowResult<T>> {
-    return this.db.deleteOrThrow({ table: this.tableName, key: this.extractKey(key), ...options });
+    key: RepoKey<this>,
+    options?: Omit<RepoDeleteOptions, "return">,
+  ): Promise<RepoDeleteOrThrowResult<this>> {
+    const item = await this.db.deleteOrThrow({
+      table: this.tableName,
+      key: this.extractKey(key),
+      ...options,
+    });
+    return this.applyTransformIfNeeded(item);
   }
 
-  async query<O extends RepoQuery<T>>(query: Obj, options?: O): Promise<RepoQueryResult<T, O>> {
-    return this.db.query({ table: this.tableName, query, ...options });
-  }
-
-  async *queryPaged<O extends RepoQuery<T>>(query: Obj, options?: O): RepoQueryPagedResult<T, O> {
-    yield* this.db.queryPaged({ table: this.tableName, query, ...options }) as RepoQueryPagedResult<
-      T,
-      O
-    >;
-  }
-
-  async queryGsi<G extends GsiNames<T>, O extends RepoQueryGsi<T>>(
-    gsi: G,
+  async query<O extends RepoQueryOptions<this>>(
     query: Obj,
     options?: O,
-  ): Promise<RepoQueryGsiResult<T, O>> {
-    return this.db.query({ table: this.tableName, index: gsi, query, ...options });
+  ): Promise<RepoQueryResult<this, O>> {
+    const items = await this.db.query({ table: this.tableName, query, ...options });
+    return this.applyTransformsIfNeeded(items, options);
   }
 
-  async *queryGsiPaged<G extends GsiNames<T>, O extends RepoQueryGsi<T>>(
-    gsi: G,
+  async *queryPaged<O extends RepoQueryOptions<this>>(
     query: Obj,
     options?: O,
-  ): RepoQueryGsiPagedResult<T, O> {
-    yield* this.db.queryPaged({
+  ): RepoQueryPagedResult<this, O> {
+    for await (const page of this.db.queryPaged({ table: this.tableName, query, ...options })) {
+      yield this.applyTransformsIfNeeded(page, options);
+    }
+  }
+
+  async queryGsi<G extends TableGsiNames<T>, O extends RepoQueryGsiOptions<this>>(
+    gsi: G,
+    query: RepoQueryGsiQuery<T, G>,
+    options?: O,
+  ): Promise<RepoQueryGsiResult<this, O, G>> {
+    const items = await this.db.query({ table: this.tableName, index: gsi, query, ...options });
+    return this.applyTransformsIfNeeded(items, { ...options, gsi });
+  }
+
+  async *queryGsiPaged<G extends TableGsiNames<T>, O extends RepoQueryGsiOptions<this>>(
+    gsi: G,
+    query: RepoQueryGsiQuery<T, G>,
+    options?: O,
+  ): RepoQueryGsiPagedResult<this, O, G> {
+    for await (const page of this.db.queryPaged({
       table: this.tableName,
       index: gsi,
       query,
       ...options,
-    }) as RepoQueryGsiPagedResult<T, O>;
+    })) {
+      yield this.applyTransformsIfNeeded(page, { ...options, gsi });
+    }
   }
 
-  async scan<O extends RepoScan<T>>(options?: O): Promise<RepoScanResult<T, O>> {
-    return this.db.scan({ table: this.tableName, ...options });
+  async scan<O extends RepoScanOptions<this>>(options?: O): Promise<RepoScanResult<this, O>> {
+    const items = await this.db.scan({ table: this.tableName, ...options });
+    return this.applyTransformsIfNeeded(items, options);
   }
 
-  async *scanPaged<O extends RepoScan<T>>(options?: O): RepoScanPagedResult<T, O> {
-    yield* this.db.scanPaged({ table: this.tableName, ...options }) as RepoScanPagedResult<T, O>;
+  async *scanPaged<O extends RepoScanOptions<this>>(options?: O): RepoScanPagedResult<this, O> {
+    for await (const page of this.db.scanPaged({ table: this.tableName, ...options })) {
+      yield this.applyTransformsIfNeeded(page, options);
+    }
   }
 
-  async scanGsi<G extends GsiNames<T>, O extends RepoScanGsi<T>>(
+  async scanGsi<G extends TableGsiNames<T>, O extends RepoScanGsiOptions<this>>(
     gsi: G,
     options?: O,
-  ): Promise<RepoScanGsiResult<T, O>> {
-    return this.db.scan({ table: this.tableName, index: gsi, ...options });
+  ): Promise<RepoScanGsiResult<this, O, G>> {
+    const items = await this.db.scan({ table: this.tableName, index: gsi, ...options });
+    return this.applyTransformsIfNeeded(items, { ...options, gsi });
   }
 
-  async *scanGsiPaged<G extends GsiNames<T>, O extends RepoScanGsi<T>>(
+  async *scanGsiPaged<G extends TableGsiNames<T>, O extends RepoScanGsiOptions<this>>(
     gsi: G,
     options?: O,
-  ): RepoScanGsiPagedResult<T, O> {
-    yield* this.db.scanPaged({
+  ): RepoScanGsiPagedResult<this, O, G> {
+    for await (const page of this.db.scanPaged({
       table: this.tableName,
       index: gsi,
       ...options,
-    }) as RepoScanGsiPagedResult<T, O>;
+    })) {
+      yield this.applyTransformsIfNeeded(page, { ...options, gsi });
+    }
   }
 
-  async exists(options?: RepoExists<T>): Promise<boolean> {
+  async exists(options?: RepoExistsOptions): Promise<boolean> {
     return this.db.exists({
       table: this.tableName,
       projection: [this.table.def.partitionKey],
@@ -224,7 +276,7 @@ export class Repository<T extends Table<any, any>> {
     });
   }
 
-  async existsGsi(gsi: GsiNames<T>, options?: RepoExists<T>): Promise<boolean> {
+  async existsGsi(gsi: TableGsiNames<T>, options?: RepoExistsOptions): Promise<boolean> {
     return this.db.exists({
       table: this.tableName,
       index: gsi,
@@ -233,38 +285,37 @@ export class Repository<T extends Table<any, any>> {
     });
   }
 
-  async batchGet<O extends RepoBatchGet<T>>(
-    keys: RepoKey<T>[],
+  async batchGet<O extends RepoBatchGetOptions<this>>(
+    keys: RepoKey<this>[],
     options?: O,
-  ): Promise<RepoBatchGetResult<T, O>> {
+  ): Promise<RepoBatchGetResult<this, O>> {
     const { items, unprocessed } = await this.db.batchGet({
       [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...options },
     });
+    const tableItems = items[this.tableName];
     return {
-      items: items[this.tableName],
+      items: tableItems && this.applyTransformsIfNeeded(tableItems, options),
       unprocessed: unprocessed?.[this.tableName]?.keys,
-    } as RepoBatchGetResult<T, O>;
+    } as RepoBatchGetResult<this, O>;
   }
 
-  async batchGetOrThrow<O extends RepoBatchGet<T>>(
-    keys: RepoKey<T>[],
+  async batchGetOrThrow<O extends RepoBatchGetOptions<this>>(
+    keys: RepoKey<this>[],
     options?: O,
-  ): Promise<RepoBatchGetOrThrowResult<T, O>> {
+  ): Promise<RepoBatchGetOrThrowResult<this, O>> {
     const result = await this.db.batchGetOrThrow({
       [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...options },
     });
-    return result[this.tableName] as RepoBatchGetOrThrowResult<T, O>;
+    return this.applyTransformsIfNeeded(result[this.tableName] ?? [], options);
   }
 
-  async batchWrite(requests: RepoBatchWrite<T>): Promise<RepoBatchWriteResult<T>> {
+  async batchWrite(requests: RepoBatchWrite<this>): Promise<RepoBatchWriteResult<this>> {
     const { items, unprocessed } = await this.db.batchWrite({
       [this.tableName]: requests.map((request) => {
         if (request.type === "DELETE") {
           return { type: "DELETE", key: this.extractKey(request.key) };
         } else {
-          const itemWithDefaults = this.table.def.beforePut
-            ? { ...this.table.def.beforePut(request.item), ...request.item }
-            : request.item;
+          const itemWithDefaults = { ...this.defaultPutData, ...request.item };
           return { type: "PUT", item: itemWithDefaults };
         }
       }),
@@ -273,31 +324,30 @@ export class Repository<T extends Table<any, any>> {
     return {
       items: items[this.tableName],
       unprocessed: unprocessed?.[this.tableName],
-    } as RepoBatchWriteResult<T>;
+    } as RepoBatchWriteResult<this>;
   }
 
-  // this can be simplified now
-  // also add upsert
-
-  async trxGet<O extends RepoTrxGet<T>>(
-    keys: RepoKey<T>[],
+  async trxGet<O extends RepoTrxGetOptions<this>>(
+    keys: RepoKey<this>[],
     options?: O,
-  ): Promise<RepoTrxGetResult<T, O>> {
-    return this.db.trxGet(
+  ): Promise<RepoTrxGetResult<this, O>> {
+    const items = await this.db.trxGet(
       ...keys.map((key) => ({ table: this.tableName, key: this.extractKey(key), ...options })),
-    ) as Promise<RepoTrxGetResult<T, O>>;
+    );
+    return items.map((item: any) => item && this.applyTransformIfNeeded(item, options)) as any;
   }
 
-  async trxGetOrThrow<O extends RepoTrxGet<T>>(
-    keys: RepoKey<T>[],
+  async trxGetOrThrow<O extends RepoTrxGetOptions<this>>(
+    keys: RepoKey<this>[],
     options?: O,
-  ): Promise<RepoTrxGetOrThrowResult<T, O>> {
-    return this.db.trxGetOrThrow(
+  ): Promise<RepoTrxGetOrThrowResult<this, O>> {
+    const items = await this.db.trxGetOrThrow(
       ...keys.map((key) => ({ table: this.tableName, key: this.extractKey(key), ...options })),
-    ) as Promise<RepoTrxGetOrThrowResult<T, O>>;
+    );
+    return this.applyTransformsIfNeeded(items, options);
   }
 
-  async trxWrite(...requests: RepoTrxWriteRequest<T>[]): Promise<void> {
+  async trxWrite(...requests: RepoTrxWriteRequest<this>[]): Promise<void> {
     await this.db.trxWrite(
       ...requests.map((request) => {
         switch (request.type) {
@@ -328,43 +378,52 @@ export class Repository<T extends Table<any, any>> {
     );
   }
 
-  async trxDelete(keys: RepoKey<T>[], options?: Omit<RepoDelete<T>, "return">): Promise<void> {
+  async trxDelete(
+    keys: RepoKey<this>[],
+    options?: Omit<RepoDeleteOptions, "return">,
+  ): Promise<void> {
     return this.db.trxWrite(...keys.map((key) => this.trxDeleteRequest(key, options)));
   }
 
   // todo: return items
-  async trxPut(items: RepoPutItem<T>[], options?: Omit<RepoPut<T>, "return">): Promise<void> {
+  async trxPut(
+    items: RepoPutItem<this>[],
+    options?: Omit<RepoPutOptions, "return">,
+  ): Promise<void> {
     return this.db.trxWrite(...items.map((item) => this.trxPutRequest(item, options)));
   }
 
   async trxUpdate(
-    keys: RepoKey<T>[],
-    update: RepoUpdateData<T>,
-    options?: Omit<RepoUpdate<T>, "return">,
+    keys: RepoKey<this>[],
+    update: RepoUpdateData,
+    options?: Omit<RepoUpdateOptions, "return">,
   ): Promise<void> {
     return this.db.trxWrite(...keys.map((key) => this.trxUpdateRequest(key, update, options)));
   }
 
   // todo: return items
-  async trxCreate(items: RepoCreateItem<T>[], options?: RepoCreate<T>): Promise<void> {
+  async trxCreate(items: RepoCreateItem<this>[], options?: RepoCreateOptions): Promise<void> {
     return this.db.trxWrite(...items.map((item) => this.trxCreateRequest(item, options)));
   }
 
-  trxGetRequest<O extends RepoGet<T>>(
-    key: RepoKey<T>,
+  trxGetRequest<O extends RepoGetOptions<this>>(
+    key: RepoKey<this>,
     options?: O,
-  ): DbTrxGetRequest<RepoGetOrThrowResult<T, O>> {
+  ): DbTrxGetRequest<RepoGetOrThrowResult<this, O>> {
     return { table: this.tableName, key: this.extractKey(key), ...options };
   }
 
-  trxDeleteRequest(key: RepoKey<T>, options?: Omit<RepoDelete<T>, "return">): DbTrxWriteRequest {
+  trxDeleteRequest(
+    key: RepoKey<this>,
+    options?: Omit<RepoDeleteOptions, "return">,
+  ): DbTrxWriteRequest {
     return { table: this.tableName, type: "DELETE", key: this.extractKey(key), ...options };
   }
 
   trxConditionRequest(
-    key: RepoKey<T>,
+    key: RepoKey<this>,
     condition: Obj,
-    options?: Omit<RepoDelete<T>, "return" | "condition">,
+    options?: Omit<RepoDeleteOptions, "return" | "condition">,
   ): DbTrxWriteRequest {
     return {
       table: this.tableName,
@@ -375,21 +434,20 @@ export class Repository<T extends Table<any, any>> {
     };
   }
 
-  trxPutRequest(item: RepoPutItem<T>, options?: Omit<RepoPut<T>, "return">): DbTrxWriteRequest {
-    const itemWithDefaults = this.table.def.beforePut
-      ? { ...this.table.def.beforePut(item), ...item }
-      : item;
+  trxPutRequest(
+    item: RepoPutItem<this>,
+    options?: Omit<RepoPutOptions, "return">,
+  ): DbTrxWriteRequest {
+    const itemWithDefaults = { ...this.defaultPutData, ...item };
     return { table: this.tableName, type: "PUT", item: itemWithDefaults, ...options };
   }
 
   trxUpdateRequest(
-    key: RepoKey<T>,
-    update: RepoUpdateData<T>,
-    options?: Omit<RepoUpdate<T>, "return">,
+    key: RepoKey<this>,
+    update: RepoUpdateData,
+    options?: Omit<RepoUpdateOptions, "return">,
   ): DbTrxWriteRequest {
-    const updateWithDefaults = this.table.def.beforeUpdate
-      ? { ...this.table.def.beforeUpdate(update), ...update }
-      : update;
+    const updateWithDefaults = { ...this.defaultUpdateData, ...update };
     return {
       table: this.tableName,
       type: "UPDATE",
@@ -399,7 +457,7 @@ export class Repository<T extends Table<any, any>> {
     };
   }
 
-  trxCreateRequest(item: RepoCreateItem<T>, options?: RepoCreate<T>): DbTrxWriteRequest {
+  trxCreateRequest(item: RepoCreateItem<this>, options?: RepoCreateOptions): DbTrxWriteRequest {
     const { condition: otherCondition, ...otherOptions } = options ?? {};
 
     const condition = { $and: [{ [this.table.def.partitionKey]: { $exists: false } }] };
@@ -408,9 +466,7 @@ export class Repository<T extends Table<any, any>> {
       condition.$and.push(otherCondition);
     }
 
-    const itemWithDefaults = this.table.def.beforePut
-      ? { ...this.table.def.beforePut(item), ...item }
-      : item;
+    const itemWithDefaults = { ...this.defaultPutData, ...item };
 
     return {
       table: this.tableName,
@@ -419,5 +475,14 @@ export class Repository<T extends Table<any, any>> {
       condition,
       ...otherOptions,
     };
+  }
+}
+
+export class Repo<T extends Table<any, any>> extends AbstractRepo<T> {
+  readonly table: T;
+
+  constructor(db: Db, table: T) {
+    super(db);
+    this.table = table;
   }
 }

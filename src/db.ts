@@ -1,7 +1,6 @@
 import {
   type BatchGetItemInput,
   type BatchWriteItemInput,
-  ConditionalCheckFailedException,
   DynamoDB,
   DynamoDBClient,
   type DynamoDBClientConfig,
@@ -13,7 +12,7 @@ import type { TransactGetCommandInput, TransactWriteCommandInput } from "@aws-sd
 import * as Lib from "@aws-sdk/lib-dynamodb";
 import sift from "sift";
 import { ExpressionBuilder } from "./expression-builder";
-import { Repository } from "./repo";
+import { Repo } from "./repo";
 import type { Table } from "./table";
 import type {
   DbBatchGet,
@@ -21,7 +20,6 @@ import type {
   DbBatchWrite,
   DbBatchWriteResponse,
   DbConfig,
-  DbCreate,
   DbDelete,
   DbExists,
   DbGet,
@@ -34,7 +32,6 @@ import type {
   DbTrxGetResult,
   DbTrxWriteRequest,
   DbUpdate,
-  DbUpsert,
   Obj,
 } from "./types";
 import { removeUndefined } from "./util";
@@ -48,7 +45,8 @@ import { removeUndefined } from "./util";
 // - consider batchPut (batchPutOrThrow) and batchDelete that operate on a single table
 // - getGsi? throws if > 1 result, allows for assert, and filtering
 // - bug $in doesn't handle empty arrays, I imagine other operators are affected
-// - should create and upsert be here? I think not...
+// - consider beforeCreate, beforePut, beforeUpdate, beforeDelete, after, etc.
+// - type out repo update data
 
 export class Db {
   readonly client: Lib.DynamoDBDocumentClient;
@@ -77,8 +75,8 @@ export class Db {
     this.config = dbConfig;
   }
 
-  createRepo<T extends Table<any, any>>(table: T): Repository<T> {
-    return new Repository(table, this);
+  createRepo<T extends Table<any, any>>(table: T): Repo<T> {
+    return new Repo(this, table);
   }
 
   async listTables(data?: DbListTables): Promise<string[]> {
@@ -134,7 +132,7 @@ export class Db {
     const input = new Lib.PutCommand({
       TableName: data.table,
       Item: removeUndefined(data.item),
-      ReturnValues: data.return === "ALL_OLD" ? "ALL_OLD" : undefined,
+      ReturnValues: data.returnOld ? "ALL_OLD" : "NONE",
       ReturnValuesOnConditionCheckFailure: "ALL_OLD",
       ConditionExpression: exp.condition(data.condition),
       ExpressionAttributeNames: exp.attributeNames,
@@ -143,10 +141,10 @@ export class Db {
 
     const output = await this.client.send(input);
 
-    return (data.return === "ALL_OLD" ? output.Attributes : data) as R;
+    return (data.returnOld ? output.Attributes : data) as R;
   }
 
-  async update<R = Obj>(data: DbUpdate): Promise<R | undefined> {
+  async update<R = Obj>(data: DbUpdate): Promise<R> {
     const exp = new ExpressionBuilder();
 
     const condition = {
@@ -162,7 +160,7 @@ export class Db {
     const input = new Lib.UpdateCommand({
       TableName: data.table,
       Key: data.key,
-      ReturnValues: data.return ?? "ALL_NEW",
+      ReturnValues: "ALL_NEW",
       ReturnValuesOnConditionCheckFailure: "ALL_OLD",
       UpdateExpression: exp.update(data.update),
       ConditionExpression: exp.condition(condition),
@@ -172,46 +170,7 @@ export class Db {
 
     const output = await this.client.send(input);
 
-    return output.Attributes as R | undefined;
-  }
-
-  async create<R = Obj>(data: DbCreate): Promise<R> {
-    const { condition: otherCondition, partitionKeyName, ...options } = data;
-
-    const condition = { $and: [{ [partitionKeyName]: { $exists: false } }] };
-
-    if (otherCondition) {
-      condition.$and.push(otherCondition);
-    }
-
-    return this.put<R>({
-      ...options,
-      condition,
-      return: "ALL_NEW",
-    });
-  }
-
-  async upsert<R = Obj>(data: DbUpsert): Promise<R> {
-    const { key, item, update, ...options } = data;
-    try {
-      return (await this.update({
-        ...options,
-        key,
-        update,
-        return: "ALL_NEW",
-      })) as R;
-    } catch (e) {
-      if (e instanceof ConditionalCheckFailedException && !e.Item) {
-        // TODO: deriving the partitionKeyName like this isn't foolproof
-        return this.create({
-          item,
-          partitionKeyName: Object.keys(key)[0] ?? "",
-          ...options,
-        });
-      }
-
-      throw e;
-    }
+    return output.Attributes as R;
   }
 
   async delete<R = Obj>(data: DbDelete): Promise<R | undefined> {
@@ -220,7 +179,7 @@ export class Db {
     const input = new Lib.DeleteCommand({
       TableName: data.table,
       Key: data.key,
-      ReturnValues: data.return ?? "ALL_OLD",
+      ReturnValues: "ALL_OLD",
       ConditionExpression: exp.condition(data.condition),
       ReturnValuesOnConditionCheckFailure: "ALL_OLD",
       ExpressionAttributeNames: exp.attributeNames,
@@ -232,7 +191,7 @@ export class Db {
     return output.Attributes as R | undefined;
   }
 
-  async deleteOrThrow<R = Obj>(data: Omit<DbDelete, "return">): Promise<R> {
+  async deleteOrThrow<R = Obj>(data: DbDelete): Promise<R> {
     const item = await this.delete<R>(data);
     if (!item) {
       throw new Error(`Item not found in "${data.table}" table.`);

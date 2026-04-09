@@ -27,4 +27,10 @@ export default defineConfig({
     },
   },
   fmt: {},
+  test: {
+    typecheck: {
+      enabled: true,
+      include: ["tests/**/*.test-d.ts"],
+    },
+  },
 });

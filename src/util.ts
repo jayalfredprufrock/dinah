@@ -72,7 +72,10 @@ export const extractTableDesc = (schema: TSchema, def: TableDef): TableDesc => {
       indexName,
       partitionKey: extractTableKey(schema, gsi.partitionKey),
       sortKey: gsi.sortKey ? extractTableKey(schema, gsi.sortKey) : undefined,
-      projectionType: Array.isArray(gsi.projection) ? "INCLUDE" : (gsi.projection ?? "ALL"),
+      projectionType: (Array.isArray(gsi.projection) ? "INCLUDE" : (gsi.projection ?? "ALL")) as
+        | "ALL"
+        | "KEYS_ONLY"
+        | "INCLUDE",
       nonKeyAttributes: Array.isArray(gsi.projection) ? gsi.projection : undefined,
     };
   });

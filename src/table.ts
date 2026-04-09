@@ -12,12 +12,14 @@ import type { Static, TSchema } from "typebox";
 import type { TableDef, TableKey } from "./types";
 import { extractTableDesc } from "./util";
 
+type SchemaStatic<Schema extends TSchema> = unknown extends Static<Schema> ? any : Static<Schema>;
+
 export class Table<
   Schema extends TSchema = TSchema,
-  Def extends TableDef<Static<Schema>> = TableDef<Static<Schema>>,
+  const Def extends TableDef<SchemaStatic<Schema>> = TableDef<SchemaStatic<Schema>>,
 > {
-  readonly schema: TSchema;
-  readonly def: TableDef;
+  readonly schema: Schema;
+  readonly def: Def;
 
   constructor(schema: Schema, def: Def) {
     this.schema = schema;

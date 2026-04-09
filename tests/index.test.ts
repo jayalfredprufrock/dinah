@@ -1,12 +1,12 @@
 // @ts-nocheck
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
-import { AuditTable, PostTable, UserTable, createDb, createTables, dropTables } from "./setup";
+import { AuditRepo, PostTable, UserTable, createDb, createTables, dropTables } from "./setup";
 
 const db = createDb();
 const userRepo = db.createRepo(UserTable);
 const postRepo = db.createRepo(PostTable);
-const auditRepo = db.createRepo(AuditTable);
+const auditRepo = new AuditRepo(db);
 
 beforeAll(async () => {
   await dropTables(db);
@@ -158,35 +158,6 @@ describe("update", () => {
     await userRepo.update({ userId: "u1" }, { tags: { $prepend: "z" } });
     const result = await userRepo.get({ userId: "u1" });
     expect(result!.tags).toEqual(["z", "a", "b"]);
-  });
-});
-
-describe("upsert", () => {
-  test("updates existing item", async () => {
-    const result = await userRepo.upsert({
-      key: { userId: "u1" },
-      item: { userId: "u1", email: "x@y.com", name: "Fallback", role: "user", createdAt: 0 },
-      update: { name: "Upserted" },
-    });
-    expect(result.name).toBe("Upserted");
-    expect(result.email).toBe("a@b.com"); // original email preserved
-  });
-
-  test("creates item when it doesn't exist", async () => {
-    await userRepo.upsert({
-      key: { userId: "u-upsert-new" },
-      item: {
-        userId: "u-upsert-new",
-        email: "new@upsert.com",
-        name: "New",
-        role: "user",
-        createdAt: 300,
-      },
-      update: { name: "Updated" },
-    });
-    const result = await userRepo.get({ userId: "u-upsert-new" });
-    expect(result).toBeDefined();
-    expect(result!.email).toBe("new@upsert.com");
   });
 });
 
