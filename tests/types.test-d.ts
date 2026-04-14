@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { describe, expectTypeOf, test } from "vite-plus/test";
 import { AbstractRepo, Db, Table } from "../src";
-import type { RepoQueryGsiQuery } from "../src/types";
+import type { RepoGsiStartKey, RepoQueryGsiQuery } from "../src/types";
 
 const Schema = Type.Object({
   pk: Type.String(),
@@ -63,6 +63,17 @@ describe("get / query / scan return types", () => {
     expectTypeOf(result).toEqualTypeOf<Item[]>();
   });
 
+  test("query accepts pk + optional sk", async () => {
+    await repo.query({ pk: "a", sk: "b" });
+  });
+
+  test("query rejects missing partition key", () => {
+    // @ts-expect-error — pk is required
+    void repo.query({});
+    // @ts-expect-error — pk is required, sk alone is not enough
+    void repo.query({ sk: "b" });
+  });
+
   test("query with projection returns picked items", async () => {
     const result = await repo.query({ pk: "a" }, { projection: ["pk", "title"] });
     expectTypeOf(result).toEqualTypeOf<Pick<Item, "pk" | "title">[]>();
@@ -106,9 +117,9 @@ describe("queryGsi query argument types", () => {
   });
 
   test("GSI without sort key requires only partition key", () => {
-    expectTypeOf<RepoQueryGsiQuery<typeof TestTable, "pkOnlyGsi">>().toEqualTypeOf<
-      { gsiPk: string } & Partial<{}>
-    >();
+    expectTypeOf<RepoQueryGsiQuery<typeof TestTable, "pkOnlyGsi">>().toEqualTypeOf<{
+      gsiPk: string;
+    }>();
   });
 
   test("call site: pk-only GSI accepts pk-only query", async () => {
@@ -131,6 +142,44 @@ describe("queryGsi query argument types", () => {
   test("rejects wrong value type for sort key", () => {
     // @ts-expect-error — gsiSk must be number
     void repo.queryGsi("allGsi", { gsiPk: "a", gsiSk: "b" });
+  });
+
+  test("startKey includes table pk/sk + gsi pk/sk (GSI with sort key)", () => {
+    expectTypeOf<RepoGsiStartKey<typeof TestTable, "allGsi">>().toEqualTypeOf<{
+      pk: string;
+      sk: string;
+      gsiPk: string;
+      gsiSk: number;
+    }>();
+  });
+
+  test("startKey omits gsi sort key when GSI has none", () => {
+    expectTypeOf<RepoGsiStartKey<typeof TestTable, "pkOnlyGsi">>().toEqualTypeOf<{
+      pk: string;
+      sk: string;
+      gsiPk: string;
+    }>();
+  });
+
+  test("queryGsi startKey rejects partial key", () => {
+    // @ts-expect-error — missing gsiPk + gsiSk
+    void repo.queryGsi("allGsi", { gsiPk: "a" }, { startKey: { pk: "a", sk: "b" } });
+  });
+
+  test("queryGsi startKey accepts full composite key", async () => {
+    await repo.queryGsi(
+      "allGsi",
+      { gsiPk: "a" },
+      { startKey: { pk: "a", sk: "b", gsiPk: "c", gsiSk: 1 } },
+    );
+  });
+
+  test("scanGsi startKey has same shape", async () => {
+    await repo.scanGsi("allGsi", {
+      startKey: { pk: "a", sk: "b", gsiPk: "c", gsiSk: 1 },
+    });
+    // @ts-expect-error — missing gsiSk
+    await repo.scanGsi("allGsi", { startKey: { pk: "a", sk: "b", gsiPk: "c" } });
   });
 
   test("literal union partition key", async () => {
@@ -258,6 +307,184 @@ describe("Table def validation", () => {
       sortKey: "sk",
       gsis: {
         good: { partitionKey: "gsiPk", sortKey: "gsiSk", projection: ["title", "body"] },
+      },
+    });
+  });
+});
+
+// Multi-key GSI table
+const MultiKeySchema = Type.Object({
+  id: Type.String(),
+  tenantId: Type.String(),
+  region: Type.String(),
+  round: Type.String(),
+  bracket: Type.String(),
+  matchId: Type.String(),
+  score: Type.Number(),
+});
+
+type MultiKeyItem = {
+  id: string;
+  tenantId: string;
+  region: string;
+  round: string;
+  bracket: string;
+  matchId: string;
+  score: number;
+};
+
+const MultiKeyTable = new Table(MultiKeySchema, {
+  name: "multikey",
+  partitionKey: "id",
+  gsis: {
+    byTenantRegion: {
+      partitionKey: ["tenantId", "region"],
+      sortKey: ["round", "bracket", "matchId"],
+    },
+    multiPkOnly: {
+      partitionKey: ["tenantId", "region"],
+    },
+    multiPkSingleSk: {
+      partitionKey: ["tenantId", "region"],
+      sortKey: "round",
+    },
+    singlePkMultiSk: {
+      partitionKey: "tenantId",
+      sortKey: ["round", "bracket"],
+    },
+    keysOnlyMulti: {
+      partitionKey: ["tenantId", "region"],
+      sortKey: ["round", "bracket"],
+      projection: "KEYS_ONLY",
+    },
+  },
+});
+
+const mkRepo = db.createRepo(MultiKeyTable);
+
+describe("multi-key GSI query argument types", () => {
+  test("multi-key PK requires all partition key fields", () => {
+    expectTypeOf<RepoQueryGsiQuery<typeof MultiKeyTable, "byTenantRegion">>().toMatchTypeOf<{
+      tenantId: string;
+      region: string;
+    }>();
+  });
+
+  test("multi-key PK rejects missing partition key field", () => {
+    // @ts-expect-error — both tenantId and region are required
+    void mkRepo.queryGsi("byTenantRegion", { tenantId: "t1" });
+    // @ts-expect-error — both tenantId and region are required
+    void mkRepo.queryGsi("byTenantRegion", { region: "us-east" });
+  });
+
+  test("multi-key SK allows left-to-right combinations", async () => {
+    // PK only — valid
+    await mkRepo.queryGsi("byTenantRegion", { tenantId: "t1", region: "us" });
+    // PK + first SK — valid
+    await mkRepo.queryGsi("byTenantRegion", { tenantId: "t1", region: "us", round: "SEMI" });
+    // PK + first two SKs — valid
+    await mkRepo.queryGsi("byTenantRegion", {
+      tenantId: "t1",
+      region: "us",
+      round: "SEMI",
+      bracket: "UPPER",
+    });
+    // PK + all SKs — valid
+    await mkRepo.queryGsi("byTenantRegion", {
+      tenantId: "t1",
+      region: "us",
+      round: "SEMI",
+      bracket: "UPPER",
+      matchId: "m1",
+    });
+  });
+
+  test("multi PK only GSI requires all PK fields", () => {
+    expectTypeOf<RepoQueryGsiQuery<typeof MultiKeyTable, "multiPkOnly">>().toEqualTypeOf<{
+      tenantId: string;
+      region: string;
+    }>();
+  });
+
+  test("multi PK + single SK GSI allows optional SK", () => {
+    expectTypeOf<RepoQueryGsiQuery<typeof MultiKeyTable, "multiPkSingleSk">>().toEqualTypeOf<
+      { tenantId: string; region: string } & Partial<{ round: string }>
+    >();
+  });
+
+  test("single PK + multi SK GSI allows left-to-right SK", async () => {
+    // PK only
+    await mkRepo.queryGsi("singlePkMultiSk", { tenantId: "t1" });
+    // PK + first SK
+    await mkRepo.queryGsi("singlePkMultiSk", { tenantId: "t1", round: "SEMI" });
+    // PK + both SKs
+    await mkRepo.queryGsi("singlePkMultiSk", {
+      tenantId: "t1",
+      round: "SEMI",
+      bracket: "UPPER",
+    });
+  });
+});
+
+describe("multi-key GSI startKey types", () => {
+  test("startKey includes table PK + all GSI PK/SK fields", () => {
+    expectTypeOf<RepoGsiStartKey<typeof MultiKeyTable, "byTenantRegion">>().toEqualTypeOf<{
+      id: string;
+      tenantId: string;
+      region: string;
+      round: string;
+      bracket: string;
+      matchId: string;
+    }>();
+  });
+
+  test("startKey omits GSI SK when not present", () => {
+    expectTypeOf<RepoGsiStartKey<typeof MultiKeyTable, "multiPkOnly">>().toEqualTypeOf<{
+      id: string;
+      tenantId: string;
+      region: string;
+    }>();
+  });
+});
+
+describe("multi-key GSI projection return types", () => {
+  test("KEYS_ONLY returns all key attributes from multi-key GSI", async () => {
+    const result = await mkRepo.queryGsi("keysOnlyMulti", {
+      tenantId: "t1",
+      region: "us",
+    });
+    expectTypeOf(result).toEqualTypeOf<
+      Pick<MultiKeyItem, "id" | "tenantId" | "region" | "round" | "bracket">[]
+    >();
+  });
+
+  test("ALL projection returns full items", async () => {
+    const result = await mkRepo.queryGsi("byTenantRegion", {
+      tenantId: "t1",
+      region: "us",
+    });
+    expectTypeOf(result).toEqualTypeOf<MultiKeyItem[]>();
+  });
+});
+
+describe("multi-key GSI table def validation", () => {
+  test("valid multi-key GSI def compiles", () => {
+    new Table(MultiKeySchema, {
+      name: "t",
+      partitionKey: "id",
+      gsis: {
+        good: { partitionKey: ["tenantId", "region"], sortKey: ["round", "bracket"] },
+      },
+    });
+  });
+
+  test("multi-key GSI rejects invalid field names", () => {
+    new Table(MultiKeySchema, {
+      name: "t",
+      partitionKey: "id",
+      gsis: {
+        // @ts-expect-error — "nope" is not a field on schema
+        bad: { partitionKey: ["tenantId", "nope"] },
       },
     });
   });

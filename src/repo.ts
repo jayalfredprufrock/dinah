@@ -46,6 +46,7 @@ import type {
   RepoUpdateData,
   RepoUpdateResult,
   RepoQueryGsiQuery,
+  RepoQueryQuery,
 } from "./types";
 
 // TODO: query/queryGsi needs strongly typed "key" argument
@@ -78,26 +79,6 @@ export abstract class AbstractRepo<T extends Table> {
 
   transformItem(item: ExtractTableSchema<T>): ExtractTableSchema<T> {
     return item;
-  }
-
-  private applyTransformsIfNeeded(
-    items: Obj[],
-    options?: { projection?: any[]; gsi?: string },
-  ): any[] {
-    // transforms aren't applied when applying a projection
-    if (options?.projection?.length) return items;
-    if (options?.gsi) {
-      // projections inherited to GSIs also prevent transformation
-      const gsiProj = this.table.def.gsis?.[options.gsi]?.projection;
-      if (gsiProj === "KEYS_ONLY" || Array.isArray(gsiProj)) return items;
-    }
-
-    return items.map((item) => this.transformItem(item as ExtractTableSchema<T>));
-  }
-
-  private applyTransformIfNeeded(item: Obj, options?: { projection?: any[]; gsi?: string }): any {
-    const [transformedItem] = this.applyTransformsIfNeeded([item], options);
-    return transformedItem;
   }
 
   // TODO: should this throw if pk is missing?
@@ -196,7 +177,7 @@ export abstract class AbstractRepo<T extends Table> {
   }
 
   async query<O extends RepoQueryOptions<this>>(
-    query: Obj,
+    query: RepoQueryQuery<this>,
     options?: O,
   ): Promise<RepoQueryResult<this, O>> {
     const items = await this.db.query({ table: this.tableName, query, ...options });
@@ -204,7 +185,7 @@ export abstract class AbstractRepo<T extends Table> {
   }
 
   async *queryPaged<O extends RepoQueryOptions<this>>(
-    query: Obj,
+    query: RepoQueryQuery<this>,
     options?: O,
   ): RepoQueryPagedResult<this, O> {
     for await (const page of this.db.queryPaged({ table: this.tableName, query, ...options })) {
@@ -212,7 +193,7 @@ export abstract class AbstractRepo<T extends Table> {
     }
   }
 
-  async queryGsi<G extends TableGsiNames<T>, O extends RepoQueryGsiOptions<this>>(
+  async queryGsi<G extends TableGsiNames<T>, O extends RepoQueryGsiOptions<this, T, G>>(
     gsi: G,
     query: RepoQueryGsiQuery<T, G>,
     options?: O,
@@ -221,7 +202,7 @@ export abstract class AbstractRepo<T extends Table> {
     return this.applyTransformsIfNeeded(items, { ...options, gsi });
   }
 
-  async *queryGsiPaged<G extends TableGsiNames<T>, O extends RepoQueryGsiOptions<this>>(
+  async *queryGsiPaged<G extends TableGsiNames<T>, O extends RepoQueryGsiOptions<this, T, G>>(
     gsi: G,
     query: RepoQueryGsiQuery<T, G>,
     options?: O,
@@ -247,7 +228,7 @@ export abstract class AbstractRepo<T extends Table> {
     }
   }
 
-  async scanGsi<G extends TableGsiNames<T>, O extends RepoScanGsiOptions<this>>(
+  async scanGsi<G extends TableGsiNames<T>, O extends RepoScanGsiOptions<this, T, G>>(
     gsi: G,
     options?: O,
   ): Promise<RepoScanGsiResult<this, O, G>> {
@@ -255,7 +236,7 @@ export abstract class AbstractRepo<T extends Table> {
     return this.applyTransformsIfNeeded(items, { ...options, gsi });
   }
 
-  async *scanGsiPaged<G extends TableGsiNames<T>, O extends RepoScanGsiOptions<this>>(
+  async *scanGsiPaged<G extends TableGsiNames<T>, O extends RepoScanGsiOptions<this, T, G>>(
     gsi: G,
     options?: O,
   ): RepoScanGsiPagedResult<this, O, G> {
@@ -475,6 +456,26 @@ export abstract class AbstractRepo<T extends Table> {
       condition,
       ...otherOptions,
     };
+  }
+
+  private applyTransformsIfNeeded(
+    items: Obj[],
+    options?: { projection?: any[]; gsi?: string },
+  ): any[] {
+    // transforms aren't applied when applying a projection
+    if (options?.projection?.length) return items;
+    if (options?.gsi) {
+      // projections inherited to GSIs also prevent transformation
+      const gsiProj = this.table.def.gsis?.[options.gsi]?.projection;
+      if (gsiProj === "KEYS_ONLY" || Array.isArray(gsiProj)) return items;
+    }
+
+    return items.map((item) => this.transformItem(item as ExtractTableSchema<T>));
+  }
+
+  private applyTransformIfNeeded(item: Obj, options?: { projection?: any[]; gsi?: string }): any {
+    const [transformedItem] = this.applyTransformsIfNeeded([item], options);
+    return transformedItem;
   }
 }
 

@@ -641,3 +641,67 @@ describe("Db direct operations", () => {
     expect(repo.tableName).toBe("test-users");
   });
 });
+
+describe("filter on missing attributes", () => {
+  test("inequality filters and missing attributes", async () => {
+    // item without age
+    await userRepo.put({
+      userId: "u-no-age",
+      email: "noage@test.com",
+      name: "NoAge",
+      role: "tester",
+      createdAt: 900,
+    });
+
+    // item with age
+    await userRepo.put({
+      userId: "u-has-age",
+      email: "hasage@test.com",
+      name: "HasAge",
+      role: "tester",
+      createdAt: 901,
+      age: 30,
+    });
+
+    // verify the attribute is actually missing
+    const noAge = await userRepo.get({ userId: "u-no-age" });
+    expect(noAge).toBeDefined();
+    expect(noAge!.age).toBeUndefined();
+
+    // $ne does NOT exclude items where the attribute is missing
+    const neResults = await userRepo.scan({ filter: { age: { $ne: 99 }, role: "tester" } });
+    const neIds = neResults.map((r) => r.userId);
+    expect(neIds).toContain("u-has-age");
+    expect(neIds).toContain("u-no-age");
+
+    // $gt DOES exclude items where the attribute is missing
+    const gtResults = await userRepo.scan({ filter: { age: { $gt: 0 }, role: "tester" } });
+    const gtIds = gtResults.map((r) => r.userId);
+    expect(gtIds).toContain("u-has-age");
+    expect(gtIds).not.toContain("u-no-age");
+
+    // $lt also excludes missing
+    const ltResults = await userRepo.scan({ filter: { age: { $lt: 999 }, role: "tester" } });
+    const ltIds = ltResults.map((r) => r.userId);
+    expect(ltIds).toContain("u-has-age");
+    expect(ltIds).not.toContain("u-no-age");
+
+    // $gte excludes missing
+    const gteResults = await userRepo.scan({ filter: { age: { $gte: 0 }, role: "tester" } });
+    const gteIds = gteResults.map((r) => r.userId);
+    expect(gteIds).toContain("u-has-age");
+    expect(gteIds).not.toContain("u-no-age");
+
+    // $lte excludes missing
+    const lteResults = await userRepo.scan({ filter: { age: { $lte: 999 }, role: "tester" } });
+    const lteIds = lteResults.map((r) => r.userId);
+    expect(lteIds).toContain("u-has-age");
+    expect(lteIds).not.toContain("u-no-age");
+
+    // $eq excludes missing
+    const eqResults = await userRepo.scan({ filter: { age: { $eq: 30 }, role: "tester" } });
+    const eqIds = eqResults.map((r) => r.userId);
+    expect(eqIds).toContain("u-has-age");
+    expect(eqIds).not.toContain("u-no-age");
+  });
+});

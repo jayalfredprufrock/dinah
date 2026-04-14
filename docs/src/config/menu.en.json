@@ -1,0 +1,57 @@
+{
+  "main": [
+    {
+      "name": "Home",
+      "url": "/"
+    },
+    {
+      "name": "Documentation",
+      "url": "/getting-started/introduction/"
+    },
+    {
+      "name": "GitHub",
+      "url": "https://github.com/jayalfredprufrock/dinah"
+    }
+  ],
+  "footer": {
+    "community": {
+      "title": "Project",
+      "links": [
+        {
+          "name": "GitHub",
+          "url": "https://github.com/jayalfredprufrock/dinah"
+        },
+        {
+          "name": "Issues",
+          "url": "https://github.com/jayalfredprufrock/dinah/issues"
+        },
+        {
+          "name": "npm",
+          "url": "https://www.npmjs.com/package/dinah"
+        }
+      ]
+    },
+    "help_links": {
+      "title": "Documentation",
+      "links": [
+        {
+          "name": "Getting Started",
+          "url": "/getting-started/introduction/"
+        }
+      ]
+    },
+    "company": {
+      "title": "Resources",
+      "links": [
+        {
+          "name": "typebox",
+          "url": "https://github.com/sinclairzx81/typebox"
+        },
+        {
+          "name": "DynamoDB",
+          "url": "https://aws.amazon.com/dynamodb/"
+        }
+      ]
+    }
+  }
+}

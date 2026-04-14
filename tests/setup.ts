@@ -72,6 +72,8 @@ export class AuditRepo extends AbstractRepo<typeof AuditTable> {
   }
 }
 
+export const ALL_TABLES = [UserTable, PostTable, AuditTable];
+
 export function createDb(): Db {
   return new Db({
     region: "us-east-1",
@@ -81,17 +83,10 @@ export function createDb(): Db {
 }
 
 export async function createTables(db: Db): Promise<void> {
-  await Promise.all([
-    UserTable.createTable(db.client),
-    PostTable.createTable(db.client),
-    AuditTable.createTable(db.client),
-  ]);
+  await Promise.all(ALL_TABLES.map((t) => db.createTable(t)));
 }
 
 export async function dropTables(db: Db): Promise<void> {
-  await Promise.all([
-    UserTable.drop(db.client).catch(() => {}),
-    PostTable.drop(db.client).catch(() => {}),
-    AuditTable.drop(db.client).catch(() => {}),
-  ]);
+  await Promise.all(ALL_TABLES.map((t) => db.deleteTable(t.def.name).catch(() => {})));
 }
+

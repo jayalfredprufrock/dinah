@@ -1,92 +1,93 @@
-import type { AttributeDefinition } from "@aws-sdk/client-dynamodb";
+import type {
+  AttributeDefinition,
+  CreateTableCommandInput,
+  ProjectionType,
+} from "@aws-sdk/client-dynamodb";
 import { type TSchema } from "typebox";
 import * as T from "typebox";
-import type { Obj, ResolvedAttrType, TableDef, TableDesc, TableGsi, TableKey } from "./types";
+import type { Obj } from "./types";
+import type { Table } from "./table";
 
-export const resolveAttrType = (schema: TSchema, attrName: string): ResolvedAttrType => {
+export const resolveAttrType = (schema: TSchema, attrName: string): "S" | "N" => {
   if (T.IsString(schema) || T.IsLiteralString(schema)) {
-    return T.IsOptional(schema) ? ["S", undefined] : ["S"];
+    return "S";
   }
 
   if (T.IsNumber(schema) || T.IsLiteralNumber(schema)) {
-    return T.IsOptional(schema) ? ["N", undefined] : ["N"];
+    return "N";
   }
 
   if (T.IsObject(schema)) {
     const attrSchema = schema.properties[attrName];
-    if (!attrSchema) return [undefined];
+    if (!attrSchema) {
+      throw new Error(`Attribute "${attrName}" not found.`);
+    }
     return resolveAttrType(attrSchema, attrName);
   }
 
-  if (T.IsIntersect(schema)) {
-    return schema.allOf.flatMap((s) => resolveAttrType(s, attrName));
+  if (T.IsIntersect(schema) || T.IsUnion(schema)) {
+    const schemas = T.IsUnion(schema) ? schema.anyOf : schema.allOf;
+    const [firstType, ...otherTypes] = schemas.flatMap((s) => resolveAttrType(s, attrName));
+    if (!firstType || !otherTypes.every((t) => t !== firstType)) {
+      throw new Error(`Attribute "${attrName}" type not consistent.`);
+    }
+
+    return firstType;
   }
 
-  if (T.IsUnion(schema)) {
-    return schema.anyOf.flatMap((s) => resolveAttrType(s, attrName));
-  }
-
-  return [];
+  throw new Error(`Unable to resolve type for attribute "${attrName}"`);
 };
 
-export const getAttrType = (
-  schema: TSchema,
-  attrName: string,
-  allowedTypes: ResolvedAttrType = ["S", "N", undefined],
-): "S" | "N" => {
-  const resolvedType = resolveAttrType(schema, attrName);
-  if (resolvedType.includes("S") && resolvedType.includes("N")) {
-    throw new Error(`Attribute ${attrName} cannot be both a number and a string.`);
-  }
-  if (!allowedTypes.includes(undefined) && resolvedType.includes(undefined)) {
-    throw new Error(`Attribute ${attrName} cannot be optional.`);
-  }
-  return resolvedType.includes("S") ? "S" : "N";
-};
+export const extractTableDesc = (table: Table): CreateTableCommandInput => {
+  const attributes = new Map<string, AttributeDefinition>();
 
-export const extractAttribute = (
-  schema: TSchema,
-  attrName: string,
-  allowedTypes?: ResolvedAttrType,
-): AttributeDefinition => {
-  return {
-    AttributeName: attrName,
-    AttributeType: getAttrType(schema, attrName, allowedTypes),
+  const setAttributes = (
+    attrNames: (string | undefined)[],
+    keyType: "HASH" | "RANGE",
+  ): { AttributeName: string; KeyType: "HASH" | "RANGE" }[] => {
+    return attrNames.flatMap((attrName) => {
+      if (!attrName) return [];
+      attributes.set(attrName, {
+        AttributeName: attrName,
+        AttributeType: resolveAttrType(table.schema, attrName),
+      });
+      return { AttributeName: attrName, KeyType: keyType };
+    });
   };
-};
 
-export const extractTableKey = (
-  schema: TSchema,
-  attrName: string,
-  allowedTypes?: ResolvedAttrType,
-): TableKey => {
+  let gsis: CreateTableCommandInput["GlobalSecondaryIndexes"];
+  if (table.def.gsis) {
+    gsis = Object.entries(table.def.gsis ?? {}).map(([indexName, gsi]) => {
+      return {
+        IndexName: indexName,
+        KeySchema: [
+          ...setAttributes([gsi.partitionKey].flat(), "HASH"),
+          ...setAttributes([gsi.sortKey].flat(), "RANGE"),
+        ],
+        Projection: {
+          ProjectionType: (Array.isArray(gsi.projection)
+            ? "INCLUDE"
+            : (gsi.projection ?? "ALL")) as ProjectionType,
+          NonKeyAttributes: Array.isArray(gsi.projection) ? gsi.projection : undefined,
+        },
+      };
+    });
+  }
+
+  // attribute definitions need to go AFTER key schemas since
+  // are built while resolving the rest of the configuration
   return {
-    name: attrName,
-    type: getAttrType(schema, attrName, allowedTypes),
-  };
-};
-
-export const extractTableDesc = (schema: TSchema, def: TableDef): TableDesc => {
-  const gsis: TableGsi[] = Object.entries(def.gsis ?? {}).map(([indexName, gsi]) => {
-    return {
-      indexName,
-      partitionKey: extractTableKey(schema, gsi.partitionKey),
-      sortKey: gsi.sortKey ? extractTableKey(schema, gsi.sortKey) : undefined,
-      projectionType: (Array.isArray(gsi.projection) ? "INCLUDE" : (gsi.projection ?? "ALL")) as
-        | "ALL"
-        | "KEYS_ONLY"
-        | "INCLUDE",
-      nonKeyAttributes: Array.isArray(gsi.projection) ? gsi.projection : undefined,
-    };
-  });
-
-  return {
-    tableName: def.name,
-    billingMode: def.billingMode ?? "PAY_PER_REQUEST",
-    stream: def.stream,
-    partitionKey: extractTableKey(schema, def.partitionKey, ["N", "S"]),
-    sortKey: def.sortKey ? extractTableKey(schema, def.sortKey, ["N", "S"]) : undefined,
-    gsis: gsis.length ? gsis : undefined,
+    TableName: table.def.name,
+    KeySchema: [
+      ...setAttributes([table.def.partitionKey], "HASH"),
+      ...setAttributes([table.def.sortKey], "RANGE"),
+    ],
+    GlobalSecondaryIndexes: gsis,
+    AttributeDefinitions: [...attributes.values()],
+    BillingMode: table.def.billingMode,
+    StreamSpecification: table.def.stream
+      ? { StreamEnabled: true, StreamViewType: table.def.stream }
+      : undefined,
   };
 };
 

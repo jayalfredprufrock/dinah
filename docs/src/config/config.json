@@ -1,0 +1,29 @@
+{
+  "site": {
+    "title": "Dinah",
+    "logo": "/src/assets/dinah-logo.png",
+    "logo_darkmode": "/src/assets/dinah-logo.png",
+    "logo_width": "127",
+    "logo_height": "32",
+    "logo_text": "Dinah"
+  },
+
+  "settings": {
+    "search": true,
+    "theme_switcher": true
+  },
+
+  "params": {
+    "footer_contact": {
+      "enable": false,
+      "action": "#"
+    },
+    "copyright": "MIT Licensed &middot; <a class=\"text-primary hover:underline no-underline\" href=\"https://github.com/jayalfredprufrock/dinah\" target=\"_blank\" rel=\"noopener\">github.com/jayalfredprufrock/dinah</a>"
+  },
+
+  "navigation_button": {
+    "enable": true,
+    "label": "Get Started",
+    "link": "/getting-started/introduction/"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@jayalfredprufrock/dinah-docs",
+  "version": "1.0.0",
+  "description": "DocKit Astro is a simple, modern documentation theme built using Astro and Tailwind CSS",
+  "license": "MIT",
+  "author": "Themefisher",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@astro-community/astro-embed-youtube": "^0.5.10",
+    "@astrojs/starlight": "0.38.1",
+    "@astrojs/starlight-tailwind": "5.0.0",
+    "@pagefind/default-ui": "catalog:",
+    "@tailwindcss/vite": "^4.1.17",
+    "astro": "6.0.4",
+    "astro-font": "^1.1.0",
+    "marked": "^17.0.1",
+    "sharp": "^0.34.5",
+    "vite": "^7.2.6"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.7",
+    "astro-vtbot": "^2.1.9",
+    "tailwindcss": "^4.1.17"
+  }
+}

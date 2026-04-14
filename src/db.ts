@@ -1,6 +1,8 @@
 import {
   type BatchGetItemInput,
   type BatchWriteItemInput,
+  CreateTableCommand,
+  DeleteTableCommand,
   DynamoDB,
   DynamoDBClient,
   type DynamoDBClientConfig,
@@ -34,7 +36,7 @@ import type {
   DbUpdate,
   Obj,
 } from "./types";
-import { removeUndefined } from "./util";
+import { extractTableDesc, removeUndefined } from "./util";
 
 // TODO
 // - caching support?
@@ -75,8 +77,16 @@ export class Db {
     this.config = dbConfig;
   }
 
-  createRepo<T extends Table<any, any>>(table: T): Repo<T> {
+  createRepo<T extends Table>(table: T): Repo<T> {
     return new Repo(this, table);
+  }
+
+  async createTable(table: Table): Promise<void> {
+    await this.client.send(new CreateTableCommand(extractTableDesc(table)));
+  }
+
+  async deleteTable(tableName: string): Promise<void> {
+    await this.client.send(new DeleteTableCommand({ TableName: tableName }));
   }
 
   async listTables(data?: DbListTables): Promise<string[]> {

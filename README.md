@@ -203,25 +203,29 @@ await userRepo.trxWrite(
 );
 ```
 
-### Lifecycle Hooks
+### Default Values
 
-Tables support `beforePut` and `beforeUpdate` hooks for setting defaults like timestamps:
+To attach defaults like timestamps to every write, subclass `AbstractRepo` and override `defaultPutData` and/or `defaultUpdateData`:
 
 ```typescript
-const UserTable = new Table(schema, {
-  name: "users",
-  partitionKey: "userId",
-  beforePut: (item) => ({
-    createdAt: Date.now(),
-    ...item,
-    updatedAt: Date.now(),
-  }),
-  beforeUpdate: (update) => ({
-    ...update,
-    updatedAt: Date.now(),
-  }),
-});
+import { AbstractRepo } from "dinah";
+
+class UserRepo extends AbstractRepo<typeof UserTable> {
+  readonly table = UserTable;
+
+  override get defaultPutData() {
+    return { createdAt: Date.now() };
+  }
+
+  override get defaultUpdateData() {
+    return { updatedAt: Date.now() };
+  }
+}
+
+const userRepo = new UserRepo(db);
 ```
+
+`defaultPutData` is merged under every `put` / `create` / `batchWrite` put / `trxPut` / `trxCreate`. `defaultUpdateData` is merged under every `update` / `trxUpdate`. Caller-provided values always win on conflict.
 
 ## License
 

@@ -225,6 +225,39 @@ export type ExtractKeys<T, O> = {
   [K in AllKeys<T>]: PickTypeOf<T, K, O> extends never ? never : { k: K; v: PickTypeOf<T, K, O> };
 }[AllKeys<T>]["k"];
 
+// Normalize string | readonly string[] to a union of strings
+type ToUnion<T> = T extends readonly (infer U)[] ? U : T;
+
+// Enumerate valid left-to-right sort key combinations for multi-key GSIs (max 4 attributes)
+type SortKeyQuery<Schema, SK> = SK extends readonly [
+  infer A extends string & keyof Schema,
+  infer B extends string & keyof Schema,
+  infer C extends string & keyof Schema,
+  infer D extends string & keyof Schema,
+]
+  ?
+      | {}
+      | Pick<Schema, A>
+      | Pick<Schema, A | B>
+      | Pick<Schema, A | B | C>
+      | Pick<Schema, A | B | C | D>
+  : SK extends readonly [
+        infer A extends string & keyof Schema,
+        infer B extends string & keyof Schema,
+        infer C extends string & keyof Schema,
+      ]
+    ? {} | Pick<Schema, A> | Pick<Schema, A | B> | Pick<Schema, A | B | C>
+    : SK extends readonly [
+          infer A extends string & keyof Schema,
+          infer B extends string & keyof Schema,
+        ]
+      ? {} | Pick<Schema, A> | Pick<Schema, A | B>
+      : SK extends readonly [infer A extends string & keyof Schema]
+        ? {} | Pick<Schema, A>
+        : SK extends string & keyof Schema
+          ? Partial<Pick<Schema, SK>>
+          : {};
+
 // primary keys must exist across all union objects,
 // cant be optional, and can either be strings or numbers
 export type ValidPrimaryKeys<T> = {
@@ -287,8 +320,8 @@ type TableKeyAttributes<R extends AbstractRepo<any>> =
   | (R["table"]["def"]["sortKey"] & string);
 
 type GsiOwnKeyAttributes<R extends AbstractRepo<any>, G extends string> =
-  | GsiDef<R, G>["partitionKey"]
-  | (GsiDef<R, G>["sortKey"] & string);
+  | (ToUnion<GsiDef<R, G>["partitionKey"]> & string)
+  | (ToUnion<GsiDef<R, G>["sortKey"]> & string);
 
 type GsiAllKeyAttributes<R extends AbstractRepo<any>, G extends string> =
   | TableKeyAttributes<R>
@@ -365,6 +398,12 @@ export type RepoDeleteOrThrowResult<R extends AbstractRepo<any>> = RepoOutput<R>
 
 // query ---------------------------------------------------------------------------------------------
 
+export type RepoQueryQuery<R extends AbstractRepo<any>> = Pick<
+  R["$schema"],
+  R["table"]["def"]["partitionKey"]
+> &
+  SortKeyQuery<R["$schema"], R["table"]["def"]["sortKey"]>;
+
 export interface RepoQueryOptions<R extends AbstractRepo<any>> {
   startKey?: RepoKey<R>;
   filter?: Obj;
@@ -388,14 +427,32 @@ export type RepoQueryPagedResult<
 
 export type RepoQueryGsiQuery<T extends Table, G extends string> = Pick<
   ExtractTableSchema<T>,
-  NonNullable<ExtractTableDef<T>["gsis"]>[G]["partitionKey"]
+  ToUnion<NonNullable<ExtractTableDef<T>["gsis"]>[G]["partitionKey"]> & string
 > &
-  Partial<
-    Pick<ExtractTableSchema<T>, NonNullable<ExtractTableDef<T>["gsis"]>[G]["sortKey"] & string>
-  >;
+  SortKeyQuery<ExtractTableSchema<T>, NonNullable<ExtractTableDef<T>["gsis"]>[G]["sortKey"]>;
 
-export interface RepoQueryGsiOptions<R extends AbstractRepo<any>> {
-  startKey?: RepoKey<R>; //TODO: should include GSI key
+type GsiSortKeyOf<T extends Table, G extends string> = ToUnion<
+  NonNullable<ExtractTableDef<T>["gsis"]>[G] extends { sortKey: infer SK } ? SK : never
+> &
+  string;
+
+type TableSortKeyOf<T extends Table> =
+  ExtractTableDef<T> extends { sortKey: infer SK extends string } ? SK : never;
+
+export type RepoGsiStartKey<T extends Table, G extends string> = Pick<
+  ExtractTableSchema<T>,
+  | ExtractTableDef<T>["partitionKey"]
+  | TableSortKeyOf<T>
+  | (ToUnion<NonNullable<ExtractTableDef<T>["gsis"]>[G]["partitionKey"]> & string)
+  | GsiSortKeyOf<T, G>
+>;
+
+export interface RepoQueryGsiOptions<
+  R extends AbstractRepo<any>,
+  T extends Table = Table,
+  G extends string = string,
+> {
+  startKey?: RepoGsiStartKey<T, G>;
   filter?: Obj;
   projection?: Projection<R>;
   limit?: number;
@@ -437,8 +494,12 @@ export type RepoScanPagedResult<
 
 // scan gsi ------------------------------------------------------------------------------------------
 
-export interface RepoScanGsiOptions<R extends AbstractRepo<any>> {
-  startKey?: RepoKey<R>; //TODO: should include GSI key
+export interface RepoScanGsiOptions<
+  R extends AbstractRepo<any>,
+  T extends Table = Table,
+  G extends string = string,
+> {
+  startKey?: RepoGsiStartKey<T, G>;
   filter?: Obj;
   projection?: Projection<R>;
   limit?: number;
@@ -569,8 +630,8 @@ export type RepoBatchDeleteResponse<R extends AbstractRepo<any>> =
 export type PickTypeOf<T, K extends AllKeys<T>, O> = T extends { [k in K]?: O } ? T[K] : never;
 
 export interface Gsi<T> {
-  readonly partitionKey: ValidGsiKeys<T>;
-  readonly sortKey?: ValidGsiKeys<T>;
+  readonly partitionKey: ValidGsiKeys<T> | readonly ValidGsiKeys<T>[];
+  readonly sortKey?: ValidGsiKeys<T> | readonly ValidGsiKeys<T>[];
   readonly projection?: "ALL" | "KEYS_ONLY" | readonly AllKeys<T>[];
 }
 

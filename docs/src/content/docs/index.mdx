@@ -1,0 +1,220 @@
+---
+title: Dinah — Type-safe DynamoDB for TypeScript
+description: A thin, ergonomic DynamoDB client built on typebox schemas.
+template: splash
+hero:
+  title: |
+    Type-safe <span data-icon-path='hero-icon.svg'></span> DynamoDB
+    <span class="light-text">for TypeScript</span>
+  tagline: A thin, ergonomic client built on typebox schemas — with inferred types for every read, write, and query.
+---
+
+import Section from "~/components/Section.astro";
+import Card from "~/components/user-components/NewCard.astro";
+import Grid from "~/components/user-components/Grid.astro";
+
+<Section title="Built for the way <span class='light-text'>TypeScript developers work</span>" description="Schema-first, lightweight, and indistinguishable from the AWS SDK at runtime.">
+
+<Grid columns={4}>
+  <Card title="Schema-first" icon="seti:json" iconColor="#FF8585">
+    Define your table once with a typebox schema. Every operation is typed from that single source of truth.
+  </Card>
+  <Card title="Inferred everywhere" icon="seti:typescript" iconColor="#7BE1A4">
+    `get`, `query`, `put`, `update`, `delete`, transactions, and projections all return precisely-typed results.
+  </Card>
+  <Card title="GSI aware" icon="seti:db" iconColor="#FFD97B">
+    Query and scan GSIs with full key validation, projection-aware return types, and typed `startKey`s.
+  </Card>
+  <Card title="Thin & predictable" icon="seti:config" iconColor="#979BFF">
+    A small layer over the AWS SDK v3 `DynamoDBDocumentClient` — no hidden retries, no surprises.
+  </Card>
+</Grid>
+</Section>
+
+import HeroTabs from "~/components/HeroTabs.astro";
+import HeroTabsItem from "~/components/HeroTabsItem.astro";
+
+<Section
+  title="Get started <span class='light-text'>in three steps</span>"
+  description="From zero to a fully-typed repository in a few lines of code."
+>
+  <HeroTabs>
+    <HeroTabsItem
+      title="Define a schema"
+      subtitle="Describe your table shape with typebox."
+      number={1}
+      image="/src/assets/step-1.png"
+      imageAlt="Defining a schema with typebox"
+    />
+    <HeroTabsItem
+      title="Create a Table & Repo"
+      subtitle="Wire up keys, GSIs, and a Db client."
+      number={2}
+      image="/src/assets/step-2.png"
+      imageAlt="Creating a Table and Repo"
+    />
+    <HeroTabsItem
+      title="Read and write with types"
+      subtitle="Every operation is inferred end-to-end."
+      number={3}
+      image="/src/assets/step-3.png"
+      imageAlt="Typed reads and writes"
+    />
+  </HeroTabs>
+</Section>
+
+import ListCard from "~/components/user-components/ListCard.astro";
+import LinkButton from "~/components/LinkButton.astro";
+
+<Section title="Everything you need <span class='light-text'>to talk to DynamoDB</span>" description="Dinah covers the operations you reach for every day, with the types to back them up.">
+
+<Grid columns={3}>
+<ListCard title="Reads" imageIcon="/src/assets/element.svg" number="6">
+- get / getOrThrow
+- query / queryPaged
+- scan / scanPaged
+- queryGsi / scanGsi
+- batchGet
+- exists / existsGsi
+
+<LinkButton href="/guides/" variant="text" className="mt-6 mb-8 ml-4">Read the guide</LinkButton>
+</ListCard>
+
+<ListCard title="Writes" imageIcon="/src/assets/content.svg" number="6">
+- put
+- update
+- delete / deleteOrThrow
+- batchWrite
+- conditional expressions
+- optimistic concurrency
+
+<LinkButton href="/guides/" variant="text" className="mt-6 mb-8 ml-4">Read the guide</LinkButton>
+</ListCard>
+
+<ListCard title="Indexes & layouts" imageIcon="/src/assets/layouts.svg" number="4">
+- Composite primary keys
+- Global secondary indexes
+- KEYS_ONLY / INCLUDE projections
+- TTL attributes
+
+<LinkButton href="/guides/" variant="text" className="mt-6 mb-8 ml-4">Read the guide</LinkButton>
+</ListCard>
+</Grid>
+
+<Grid columns={3}>
+
+<ListCard title="Code first, runtime later" imageIcon="/src/assets/code-block.svg" number="4" image="/src/assets/code-image.png">
+
+- Inferred result types
+- Projection narrowing
+- `transformItem` subclass hook
+- Local DynamoDB friendly
+
+<LinkButton
+  href="/getting-started/introduction/"
+  variant="text"
+  className="mt-6 mb-8 ml-4"
+>
+  See the docs
+</LinkButton>
+
+</ListCard>
+
+<ListCard title="Transactions & batch" imageIcon="/src/assets/changelogs.svg" number="4">
+
+- transactWrite
+- transactGet
+- batchWrite chunking
+- batchGet chunking
+
+<LinkButton
+  href="/guides/"
+  variant="text"
+  className="mt-6 mb-8 ml-4"
+>
+  Read the guide
+</LinkButton>
+
+</ListCard>
+
+</Grid>
+
+</Section>
+
+import AccordionContainer from "~/components/AccordionContainer.astro";
+import Accordion from "~/components/Accordion.astro";
+
+<Section
+  title="Common questions <span class='light-text'>about Dinah</span>"
+  description="Answers to a few questions that come up while getting started."
+>
+
+<AccordionContainer tabList={
+  [
+    {
+      type: 'basic',
+      title: 'Getting Started',
+      subtitle:'Setup, installation, and first queries.',
+      icon: "rocket"
+    },
+    {
+      type: 'setting',
+      title: 'Schemas & Tables',
+      subtitle:'Defining keys, GSIs, and projections.',
+      icon: "settings"
+    },
+    {
+      type: 'help',
+      title: 'Help & Support',
+      subtitle:'Where to ask questions and report bugs.',
+      icon: "support"
+    }
+  ]
+}>
+
+<Accordion
+  question="What is Dinah?"
+  answer="Dinah is a thin, type-safe TypeScript client for DynamoDB. It wraps the AWS SDK v3 DocumentClient with a Repo abstraction whose return types are inferred from a typebox schema and your table definition."
+  type="basic"
+/>
+<Accordion
+  question="Do I need typebox?"
+  answer="Yes — Dinah uses typebox schemas as the single source of truth for the shape of items in a table. typebox is listed as an optional peer dependency."
+  type="basic"
+/>
+<Accordion
+  question="Does Dinah work with local DynamoDB?"
+  answer="Yes. Pass any DynamoDBDocumentClient — including one pointed at a local DynamoDB instance — when constructing the Db. Dinah does not assume cloud-only behavior."
+  type="basic"
+/>
+
+<Accordion
+  question="How do I define a GSI?"
+  answer="Pass a `gsis` map in your Table definition. Each entry specifies a partitionKey, an optional sortKey, and an optional projection (ALL by default, KEYS_ONLY, or an explicit list of attributes). Dinah infers query argument and return types from this."
+  type="setting"
+/>
+<Accordion
+  question="Why does my GSI query return a partial item?"
+  answer="If the GSI has a KEYS_ONLY or INCLUDE projection, Dinah narrows the return type to exactly the attributes that DynamoDB will actually return — the table keys plus any projected attributes."
+  type="setting"
+/>
+<Accordion
+  question="Can I add computed fields to items?"
+  answer="Yes — subclass `AbstractRepo` and override `transformItem`. Dinah threads the transformed type through every read operation that returns full items."
+  type="setting"
+/>
+
+<Accordion
+  question="Where do I report bugs?"
+  answer="Open an issue on GitHub at github.com/jayalfredprufrock/dinah/issues. PRs welcome too."
+  type="help"
+/>
+<Accordion
+  question="Is there a Discord or Slack?"
+  answer="Not yet — for now, GitHub Discussions and Issues are the best places to ask questions."
+  type="help"
+/>
+
+</AccordionContainer>
+
+</Section>

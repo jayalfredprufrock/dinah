@@ -1,0 +1,31 @@
+---
+import config from "@/config/config.json" assert { type: "json" };
+import logoSvg from "@/assets/dinah-logo-cat.svg?raw";
+
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
+
+const { title }: { title: string } = config.site;
+---
+
+<a href={siteTitleHref} class="navbar-brand inline-block site-logo" aria-label={title}>
+  <Fragment set:html={logoSvg} />
+</a>
+
+<style>
+  .site-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--sl-color-text);
+  }
+
+  .site-logo :global(svg) {
+    height: 40px;
+    width: auto;
+  }
+
+  .logo-text {
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+</style>
