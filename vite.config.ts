@@ -22,6 +22,7 @@ export default defineConfig({
     ],
   },
   lint: {
+    ignorePatterns: ["*.astro"],
     options: {
       typeAware: true,
       typeCheck: false, // TODO switch back

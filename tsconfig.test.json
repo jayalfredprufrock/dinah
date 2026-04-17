@@ -1,4 +1,3 @@
 {
-  "extends": "./tsconfig.json",
-  "exclude": ["docs"]
+  "extends": "./tsconfig.json"
 }
