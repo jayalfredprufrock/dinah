@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { describe, expectTypeOf, test } from "vite-plus/test";
 import { AbstractRepo, Db, Table } from "../src";
-import type { RepoGsiStartKey, RepoQueryGsiQuery } from "../src/types";
+import type { Condition, RepoGsiStartKey, RepoQueryGsiQuery } from "../src/types";
 
 const Schema = Type.Object({
   pk: Type.String(),
@@ -580,5 +580,237 @@ describe("transformItem return type narrowing", () => {
       data: "d",
     });
     expectTypeOf(result).toEqualTypeOf<Transformed>();
+  });
+});
+
+// ── Condition & filter typing ──────────────────────────────────────────────────
+
+const CondSchema = Type.Object({
+  userId: Type.String(),
+  age: Type.Number(),
+  active: Type.Boolean(),
+  name: Type.String(),
+  tags: Type.Array(Type.String()),
+  score: Type.Optional(Type.Number()),
+});
+
+type CondItem = {
+  userId: string;
+  age: number;
+  active: boolean;
+  name: string;
+  tags: string[];
+  score?: number;
+};
+
+const CondTable = new Table(CondSchema, {
+  name: "cond",
+  partitionKey: "userId",
+  gsis: { byName: { partitionKey: "name", sortKey: "age" } },
+});
+const condRepo = db.createRepo(CondTable);
+
+describe("condition typing — valid expressions", () => {
+  test("shorthand $eq (direct value)", () => {
+    const c: Condition<CondItem> = { name: "alice" };
+    void c;
+  });
+
+  test("explicit $eq", () => {
+    const c: Condition<CondItem> = { name: { $eq: "alice" } };
+    void c;
+  });
+
+  test("$ne on string", () => {
+    const c: Condition<CondItem> = { name: { $ne: "bob" } };
+    void c;
+  });
+
+  test("$gt/$lt/$gte/$lte on number", () => {
+    const c: Condition<CondItem> = { age: { $gt: 18 } };
+    void c;
+    const c2: Condition<CondItem> = { age: { $lte: 65 } };
+    void c2;
+  });
+
+  test("$between on number", () => {
+    const c: Condition<CondItem> = { age: { $between: [18, 65] } };
+    void c;
+  });
+
+  test("$between on string", () => {
+    const c: Condition<CondItem> = { name: { $between: ["a", "z"] } };
+    void c;
+  });
+
+  test("$prefix on string", () => {
+    const c: Condition<CondItem> = { name: { $prefix: "al" } };
+    void c;
+  });
+
+  test("$includes on string", () => {
+    const c: Condition<CondItem> = { name: { $includes: "ice" } };
+    void c;
+  });
+
+  test("$includes on array", () => {
+    const c: Condition<CondItem> = { tags: { $includes: "typescript" } };
+    void c;
+  });
+
+  test("$exists", () => {
+    const c: Condition<CondItem> = { score: { $exists: true } };
+    void c;
+  });
+
+  test("$type", () => {
+    const c: Condition<CondItem> = { name: { $type: "S" } };
+    void c;
+  });
+
+  test("$in / $nin", () => {
+    const c: Condition<CondItem> = { name: { $in: ["alice", "bob"] } };
+    void c;
+    const c2: Condition<CondItem> = { age: { $nin: [1, 2, 3] } };
+    void c2;
+  });
+
+  test("$size on array", () => {
+    const c: Condition<CondItem> = { tags: { $size: 3 } };
+    void c;
+    const c2: Condition<CondItem> = { tags: { $size: { $gt: 2 } } };
+    void c2;
+  });
+
+  test("$path reference", () => {
+    const c: Condition<CondItem> = { age: { $gt: { $path: "score" } } };
+    void c;
+  });
+
+  test("compound $and", () => {
+    const c: Condition<CondItem> = {
+      $and: [{ name: "alice" }, { age: { $gt: 18 } }],
+    };
+    void c;
+  });
+
+  test("compound $or", () => {
+    const c: Condition<CondItem> = {
+      $or: [{ active: true }, { age: { $lt: 13 } }],
+    };
+    void c;
+  });
+
+  test("compound $not", () => {
+    const c: Condition<CondItem> = {
+      $not: { name: "bob" },
+    };
+    void c;
+  });
+
+  test("nested compound", () => {
+    const c: Condition<CondItem> = {
+      $and: [{ $or: [{ name: "alice" }, { name: "bob" }] }, { $not: { active: false } }],
+    };
+    void c;
+  });
+
+  test("multiple fields in one condition", () => {
+    const c: Condition<CondItem> = { name: "alice", age: { $gte: 21 }, active: true };
+    void c;
+  });
+});
+
+describe("condition typing — invalid expressions", () => {
+  test("rejects nonexistent field", () => {
+    // @ts-expect-error — "nonExistent" is not a field on CondItem
+    const c: Condition<CondItem> = { nonExistent: "x" };
+    void c;
+  });
+
+  test("rejects wrong value type for shorthand $eq", () => {
+    // @ts-expect-error — age expects number, not string
+    const c: Condition<CondItem> = { age: "not a number" };
+    void c;
+  });
+
+  test("rejects wrong value type for $gt", () => {
+    // @ts-expect-error — $gt on number field expects number
+    const c: Condition<CondItem> = { age: { $gt: "x" } };
+    void c;
+  });
+
+  test("rejects $prefix on number field", () => {
+    // @ts-expect-error — $prefix is not valid for number fields
+    const c: Condition<CondItem> = { age: { $prefix: "x" } };
+    void c;
+  });
+
+  test("rejects $between with wrong tuple type", () => {
+    // @ts-expect-error — $between on number needs [number, number]
+    const c: Condition<CondItem> = { age: { $between: ["a", "z"] } };
+    void c;
+  });
+
+  test("rejects $exists with non-boolean", () => {
+    // @ts-expect-error — $exists expects boolean
+    const c: Condition<CondItem> = { name: { $exists: "yes" } };
+    void c;
+  });
+
+  test("rejects $in with wrong element type", () => {
+    // @ts-expect-error — $in on string field needs string[]
+    const c: Condition<CondItem> = { name: { $in: [1, 2] } };
+    void c;
+  });
+});
+
+describe("condition typing — usage in repo methods", () => {
+  test("put accepts typed condition", async () => {
+    await condRepo.put(
+      { userId: "u1", age: 25, active: true, name: "Alice", tags: [] },
+      { condition: { userId: { $exists: false } } },
+    );
+  });
+
+  test("put rejects invalid condition field", async () => {
+    await condRepo.put(
+      { userId: "u1", age: 25, active: true, name: "Alice", tags: [] },
+      // @ts-expect-error — "nope" is not a field on the schema
+      { condition: { nope: "bad" } },
+    );
+  });
+
+  test("update accepts typed condition", async () => {
+    await condRepo.update({ userId: "u1" }, { age: 26 }, { condition: { active: true } });
+  });
+
+  test("delete accepts typed condition", async () => {
+    await condRepo.delete({ userId: "u1" }, { condition: { active: { $eq: false } } });
+  });
+
+  test("query accepts typed filter", async () => {
+    await condRepo.query({ userId: "u1" }, { filter: { age: { $gt: 21 } } });
+  });
+
+  test("query rejects invalid filter field", async () => {
+    // @ts-expect-error — "nope" is not a field
+    await condRepo.query({ userId: "u1" }, { filter: { nope: 1 } });
+  });
+
+  test("scan accepts typed filter", async () => {
+    await condRepo.scan({ filter: { name: { $prefix: "A" } } });
+  });
+
+  test("queryGsi accepts typed filter", async () => {
+    await condRepo.queryGsi("byName", { name: "Alice" }, { filter: { active: true } });
+  });
+
+  test("scanGsi accepts typed filter", async () => {
+    await condRepo.scanGsi("byName", { filter: { age: { $gte: 18 } } });
+  });
+
+  test("exists accepts typed filter", async () => {
+    await condRepo.exists({ filter: { active: true } });
   });
 });

@@ -258,6 +258,88 @@ type SortKeyQuery<Schema, SK> = SK extends readonly [
           ? Partial<Pick<Schema, SK>>
           : {};
 
+// ── Condition typing ──────────────────────────────────────────────────────────
+
+/** Extract the type of field K across all members of union T */
+type ValueOfUnion<T, K extends string> = T extends unknown
+  ? K extends keyof T
+    ? T[K]
+    : never
+  : never;
+
+/** Comparison operators valid for ordered types (string, number) */
+interface ComparatorOps<V> {
+  $eq?: V;
+  $ne?: V;
+  $gt?: V;
+  $gte?: V;
+  $lt?: V;
+  $lte?: V;
+}
+
+/** String-specific operators */
+interface StringOps {
+  $prefix?: string;
+  $includes?: string;
+  $between?: [string, string];
+}
+
+/** Number-specific operators */
+interface NumberOps {
+  $between?: [number, number];
+}
+
+/** Operators valid for any attribute type */
+interface CommonOps<V> {
+  $eq?: V;
+  $ne?: V;
+  $exists?: boolean;
+  $type?: "S" | "SS" | "N" | "NS" | "B" | "BS" | "BOOL" | "NULL" | "L" | "M";
+  $in?: V[];
+  $nin?: V[];
+}
+
+/** Size operator — accepts a number or a comparator on number */
+interface SizeOps {
+  $size?: number | ComparatorOps<number>;
+}
+
+/** Path reference for cross-attribute comparisons */
+interface PathRef {
+  $path: string;
+}
+
+/**
+ * Map a field's value type to the set of valid operators.
+ * Uses `[V] extends [X]` (wrapped) to prevent distribution over unions.
+ */
+type FieldOps<V> = [V] extends [string]
+  ? CommonOps<V | PathRef> & ComparatorOps<V | PathRef> & StringOps & SizeOps
+  : [V] extends [number]
+    ? CommonOps<V | PathRef> & ComparatorOps<V | PathRef> & NumberOps & SizeOps
+    : [V] extends [boolean]
+      ? CommonOps<V | PathRef>
+      : [V] extends [any[]]
+        ? CommonOps<V | PathRef> & { $includes?: V[number] } & SizeOps
+        : CommonOps<V | PathRef> & SizeOps;
+
+/**
+ * A single field condition: either a direct value (shorthand for $eq)
+ * or an operator object.
+ */
+type FieldCondition<T> = {
+  [K in AllKeys<T>]?: ValueOfUnion<T, K> | FieldOps<ValueOfUnion<T, K>>;
+};
+
+/**
+ * Full condition expression with compound operators.
+ */
+export type Condition<T> = FieldCondition<T> & {
+  $and?: Condition<T>[];
+  $or?: Condition<T>[];
+  $not?: Condition<T>;
+};
+
 // primary keys must exist across all union objects,
 // cant be optional, and can either be strings or numbers
 export type ValidPrimaryKeys<T> = {
@@ -348,7 +430,7 @@ export type ApplyGsiProjection<R extends AbstractRepo<any>, O, G extends string>
 export interface RepoGetOptions<R extends AbstractRepo<any>> {
   consistent?: boolean;
   projection?: Projection<R>;
-  condition?: Obj;
+  condition?: Condition<R["$schema"]>;
 }
 
 export type RepoGetResult<R extends AbstractRepo<any>, O extends RepoGetOptions<R>> =
@@ -361,8 +443,8 @@ export type RepoGetOrThrowResult<
 
 // put ------------------------------------------------------------------------------------------------
 
-export interface RepoPutOptions {
-  condition?: Obj;
+export interface RepoPutOptions<R extends AbstractRepo<any>> {
+  condition?: Condition<R["$schema"]>;
 }
 
 export type RepoPutResult<R extends AbstractRepo<any>> = RepoOutput<R>;
@@ -371,8 +453,8 @@ export type RepoPutResult<R extends AbstractRepo<any>> = RepoOutput<R>;
 
 export type RepoCreateItem<R extends AbstractRepo<any>> = RepoPutItem<R>;
 
-export interface RepoCreateOptions {
-  condition?: Obj;
+export interface RepoCreateOptions<R extends AbstractRepo<any>> {
+  condition?: Condition<R["$schema"]>;
 }
 
 export type RepoCreateResult<R extends AbstractRepo<any>> = RepoOutput<R>;
@@ -381,16 +463,16 @@ export type RepoCreateResult<R extends AbstractRepo<any>> = RepoOutput<R>;
 
 export type RepoUpdateData = Obj;
 
-export interface RepoUpdateOptions {
-  condition?: Obj;
+export interface RepoUpdateOptions<R extends AbstractRepo<any>> {
+  condition?: Condition<R["$schema"]>;
 }
 
 export type RepoUpdateResult<R extends AbstractRepo<any>> = RepoOutput<R>;
 
 // delete ---------------------------------------------------------------------------------------------
 
-export interface RepoDeleteOptions {
-  condition?: Obj;
+export interface RepoDeleteOptions<R extends AbstractRepo<any>> {
+  condition?: Condition<R["$schema"]>;
 }
 
 export type RepoDeleteResult<R extends AbstractRepo<any>> = RepoOutput<R> | undefined;
@@ -406,7 +488,7 @@ export type RepoQueryQuery<R extends AbstractRepo<any>> = Pick<
 
 export interface RepoQueryOptions<R extends AbstractRepo<any>> {
   startKey?: RepoKey<R>;
-  filter?: Obj;
+  filter?: Condition<R["$schema"]>;
   projection?: Projection<R>;
   limit?: number;
   consistent?: boolean;
@@ -453,7 +535,7 @@ export interface RepoQueryGsiOptions<
   G extends string = string,
 > {
   startKey?: RepoGsiStartKey<T, G>;
-  filter?: Obj;
+  filter?: Condition<R["$schema"]>;
   projection?: Projection<R>;
   limit?: number;
   sort?: "ASC" | "DESC";
@@ -475,7 +557,7 @@ export type RepoQueryGsiPagedResult<
 
 export interface RepoScanOptions<R extends AbstractRepo<any>> {
   startKey?: RepoKey<R>;
-  filter?: Obj;
+  filter?: Condition<R["$schema"]>;
   projection?: Projection<R>;
   limit?: number;
   consistent?: boolean;
@@ -500,7 +582,7 @@ export interface RepoScanGsiOptions<
   G extends string = string,
 > {
   startKey?: RepoGsiStartKey<T, G>;
-  filter?: Obj;
+  filter?: Condition<R["$schema"]>;
   projection?: Projection<R>;
   limit?: number;
   parallel?: number;
@@ -520,9 +602,9 @@ export type RepoScanGsiPagedResult<
 
 // exists -------------------------------------------------------------------------------------------
 
-export interface RepoExistsOptions {
+export interface RepoExistsOptions<R extends AbstractRepo<any>> {
   query?: Obj;
-  filter?: Obj;
+  filter?: Condition<R["$schema"]>;
   consistent?: boolean;
 }
 
@@ -530,7 +612,7 @@ export interface RepoExistsOptions {
 
 export interface RepoTrxGetOptions<R extends AbstractRepo<any>> {
   projection?: Projection<R>;
-  condition?: Obj;
+  condition?: Condition<R["$schema"]>;
 }
 
 export type RepoTrxGetResult<R extends AbstractRepo<any>, O extends RepoTrxGetOptions<R>> = (
@@ -550,13 +632,13 @@ export type RepoTrxGetRequestResult = { table: string };
 export interface RepoTrxDeleteRequest<R extends AbstractRepo<any>> {
   type: "DELETE";
   key: RepoKey<R>;
-  condition?: Obj;
+  condition?: Condition<R["$schema"]>;
 }
 
 export interface RepoTrxPutRequest<R extends AbstractRepo<any>> {
   type: "PUT";
   item: RepoPutItem<R>;
-  condition?: Obj;
+  condition?: Condition<R["$schema"]>;
 }
 
 export interface RepoTrxUpdateRequest<R extends AbstractRepo<any>> {
@@ -564,13 +646,13 @@ export interface RepoTrxUpdateRequest<R extends AbstractRepo<any>> {
   type: "UPDATE";
   key: RepoKey<R>;
   update: RepoUpdateData;
-  condition?: Obj;
+  condition?: Condition<R["$schema"]>;
 }
 
 export interface RepoTrxConditionRequest<R extends AbstractRepo<any>> {
   type: "CONDITION";
   key: RepoKey<R>;
-  condition: Obj;
+  condition: Condition<R["$schema"]>;
 }
 
 export type RepoTrxWriteRequest<R extends AbstractRepo<any>> =
@@ -584,7 +666,7 @@ export type RepoTrxWriteRequest<R extends AbstractRepo<any>> =
 export interface RepoBatchGetOptions<R extends AbstractRepo<any>> {
   consistent?: boolean;
   projection?: Projection<R>;
-  condition?: Obj;
+  condition?: Condition<R["$schema"]>;
 }
 
 export type RepoBatchGetResult<R extends AbstractRepo<any>, O extends RepoBatchGetOptions<R>> = {

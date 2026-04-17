@@ -21,6 +21,7 @@
   "types": "./dist/index.d.cts",
   "exports": {
     ".": "./src/index.ts",
+    "./cdk": "./src/cdk.ts",
     "./streams": "./src/streams.ts",
     "./package.json": "./package.json"
   },
@@ -30,6 +31,10 @@
       ".": {
         "import": "./dist/index.mjs",
         "require": "./dist/index.cjs"
+      },
+      "./cdk": {
+        "import": "./dist/cdk.mjs",
+        "require": "./dist/cdk.cjs"
       },
       "./streams": {
         "import": "./dist/streams.mjs",
@@ -49,6 +54,7 @@
     "@tsconfig/node24": "^24.0.4",
     "@types/node": "^24.12.0",
     "@typescript/native-preview": "7.0.0-dev.20260328.1",
+    "aws-cdk-lib": "^2.250.0",
     "semantic-release": "^25.0.3",
     "typebox": "^1.1.14",
     "vite-plus": "^0.1.14"
@@ -57,11 +63,15 @@
     "@aws-sdk/client-dynamodb": "^3.1027.0",
     "@aws-sdk/client-dynamodb-streams": "^3.1027.0",
     "@aws-sdk/lib-dynamodb": "^3.1027.0",
+    "aws-cdk-lib": "^2.250.0",
     "sift": "^17.1.3",
     "typebox": "^1.1.14"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-dynamodb-streams": {
+      "optional": true
+    },
+    "aws-cdk-lib": {
       "optional": true
     },
     "sift": {

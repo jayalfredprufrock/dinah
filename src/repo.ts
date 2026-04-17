@@ -1,6 +1,7 @@
 import type { Db } from "./db";
 import type { Table } from "./table";
 import type {
+  Condition,
   DbTrxGetRequest,
   DbTrxWriteRequest,
   ExtractTableDef,
@@ -119,7 +120,7 @@ export abstract class AbstractRepo<T extends Table> {
     return this.applyTransformIfNeeded(item, options);
   }
 
-  async put(item: RepoPutItem<this>, options?: RepoPutOptions): Promise<RepoPutResult<this>> {
+  async put(item: RepoPutItem<this>, options?: RepoPutOptions<this>): Promise<RepoPutResult<this>> {
     const itemWithDefaults = { ...this.defaultPutData, ...item };
     const result = await this.db.put({ table: this.tableName, item: itemWithDefaults, ...options });
     return this.applyTransformIfNeeded(result);
@@ -128,7 +129,7 @@ export abstract class AbstractRepo<T extends Table> {
   async update(
     key: RepoKey<this>,
     update: RepoUpdateData,
-    options?: RepoUpdateOptions,
+    options?: RepoUpdateOptions<this>,
   ): Promise<RepoUpdateResult<this>> {
     const updateWithDefaults = { ...this.defaultUpdateData, ...update };
     const result = await this.db.update({
@@ -142,11 +143,11 @@ export abstract class AbstractRepo<T extends Table> {
 
   async create(
     item: RepoPutItem<this>,
-    options?: RepoCreateOptions,
+    options?: RepoCreateOptions<this>,
   ): Promise<RepoCreateResult<this>> {
     const { condition: otherCondition, ...otherOptions } = options ?? {};
 
-    const condition = { $and: [{ [this.table.def.partitionKey]: { $exists: false } }] };
+    const condition = { $and: [{ [this.table.def.partitionKey]: { $exists: false } }] } as any;
 
     if (otherCondition) {
       condition.$and.push(otherCondition);
@@ -155,7 +156,10 @@ export abstract class AbstractRepo<T extends Table> {
     return this.put(item, { condition, ...otherOptions });
   }
 
-  async delete(key: RepoKey<this>, options?: RepoDeleteOptions): Promise<RepoDeleteResult<this>> {
+  async delete(
+    key: RepoKey<this>,
+    options?: RepoDeleteOptions<this>,
+  ): Promise<RepoDeleteResult<this>> {
     const item = await this.db.delete({
       table: this.tableName,
       key: this.extractKey(key),
@@ -166,7 +170,7 @@ export abstract class AbstractRepo<T extends Table> {
 
   async deleteOrThrow(
     key: RepoKey<this>,
-    options?: Omit<RepoDeleteOptions, "return">,
+    options?: Omit<RepoDeleteOptions<this>, "return">,
   ): Promise<RepoDeleteOrThrowResult<this>> {
     const item = await this.db.deleteOrThrow({
       table: this.tableName,
@@ -249,7 +253,7 @@ export abstract class AbstractRepo<T extends Table> {
     }
   }
 
-  async exists(options?: RepoExistsOptions): Promise<boolean> {
+  async exists(options?: RepoExistsOptions<this>): Promise<boolean> {
     return this.db.exists({
       table: this.tableName,
       projection: [this.table.def.partitionKey],
@@ -257,7 +261,7 @@ export abstract class AbstractRepo<T extends Table> {
     });
   }
 
-  async existsGsi(gsi: TableGsiNames<T>, options?: RepoExistsOptions): Promise<boolean> {
+  async existsGsi(gsi: TableGsiNames<T>, options?: RepoExistsOptions<this>): Promise<boolean> {
     return this.db.exists({
       table: this.tableName,
       index: gsi,
@@ -361,7 +365,7 @@ export abstract class AbstractRepo<T extends Table> {
 
   async trxDelete(
     keys: RepoKey<this>[],
-    options?: Omit<RepoDeleteOptions, "return">,
+    options?: Omit<RepoDeleteOptions<this>, "return">,
   ): Promise<void> {
     return this.db.trxWrite(...keys.map((key) => this.trxDeleteRequest(key, options)));
   }
@@ -369,7 +373,7 @@ export abstract class AbstractRepo<T extends Table> {
   // todo: return items
   async trxPut(
     items: RepoPutItem<this>[],
-    options?: Omit<RepoPutOptions, "return">,
+    options?: Omit<RepoPutOptions<this>, "return">,
   ): Promise<void> {
     return this.db.trxWrite(...items.map((item) => this.trxPutRequest(item, options)));
   }
@@ -377,13 +381,13 @@ export abstract class AbstractRepo<T extends Table> {
   async trxUpdate(
     keys: RepoKey<this>[],
     update: RepoUpdateData,
-    options?: Omit<RepoUpdateOptions, "return">,
+    options?: Omit<RepoUpdateOptions<this>, "return">,
   ): Promise<void> {
     return this.db.trxWrite(...keys.map((key) => this.trxUpdateRequest(key, update, options)));
   }
 
   // todo: return items
-  async trxCreate(items: RepoCreateItem<this>[], options?: RepoCreateOptions): Promise<void> {
+  async trxCreate(items: RepoCreateItem<this>[], options?: RepoCreateOptions<this>): Promise<void> {
     return this.db.trxWrite(...items.map((item) => this.trxCreateRequest(item, options)));
   }
 
@@ -396,15 +400,15 @@ export abstract class AbstractRepo<T extends Table> {
 
   trxDeleteRequest(
     key: RepoKey<this>,
-    options?: Omit<RepoDeleteOptions, "return">,
+    options?: Omit<RepoDeleteOptions<this>, "return">,
   ): DbTrxWriteRequest {
     return { table: this.tableName, type: "DELETE", key: this.extractKey(key), ...options };
   }
 
   trxConditionRequest(
     key: RepoKey<this>,
-    condition: Obj,
-    options?: Omit<RepoDeleteOptions, "return" | "condition">,
+    condition: Condition<ExtractTableSchema<T>>,
+    options?: Omit<RepoDeleteOptions<this>, "return" | "condition">,
   ): DbTrxWriteRequest {
     return {
       table: this.tableName,
@@ -417,7 +421,7 @@ export abstract class AbstractRepo<T extends Table> {
 
   trxPutRequest(
     item: RepoPutItem<this>,
-    options?: Omit<RepoPutOptions, "return">,
+    options?: Omit<RepoPutOptions<this>, "return">,
   ): DbTrxWriteRequest {
     const itemWithDefaults = { ...this.defaultPutData, ...item };
     return { table: this.tableName, type: "PUT", item: itemWithDefaults, ...options };
@@ -426,7 +430,7 @@ export abstract class AbstractRepo<T extends Table> {
   trxUpdateRequest(
     key: RepoKey<this>,
     update: RepoUpdateData,
-    options?: Omit<RepoUpdateOptions, "return">,
+    options?: Omit<RepoUpdateOptions<this>, "return">,
   ): DbTrxWriteRequest {
     const updateWithDefaults = { ...this.defaultUpdateData, ...update };
     return {
@@ -438,10 +442,13 @@ export abstract class AbstractRepo<T extends Table> {
     };
   }
 
-  trxCreateRequest(item: RepoCreateItem<this>, options?: RepoCreateOptions): DbTrxWriteRequest {
+  trxCreateRequest(
+    item: RepoCreateItem<this>,
+    options?: RepoCreateOptions<this>,
+  ): DbTrxWriteRequest {
     const { condition: otherCondition, ...otherOptions } = options ?? {};
 
-    const condition = { $and: [{ [this.table.def.partitionKey]: { $exists: false } }] };
+    const condition = { $and: [{ [this.table.def.partitionKey]: { $exists: false } }] } as any;
 
     if (otherCondition) {
       condition.$and.push(otherCondition);

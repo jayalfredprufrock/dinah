@@ -139,9 +139,11 @@ export class Db {
   async put<R = Obj>(data: DbPut): Promise<R> {
     const exp = new ExpressionBuilder();
 
+    const item = removeUndefined(data.item);
+
     const input = new Lib.PutCommand({
       TableName: data.table,
-      Item: removeUndefined(data.item),
+      Item: item,
       ReturnValues: data.returnOld ? "ALL_OLD" : "NONE",
       ReturnValuesOnConditionCheckFailure: "ALL_OLD",
       ConditionExpression: exp.condition(data.condition),
@@ -151,7 +153,7 @@ export class Db {
 
     const output = await this.client.send(input);
 
-    return (data.returnOld ? output.Attributes : data) as R;
+    return (data.returnOld ? output.Attributes : item) as R;
   }
 
   async update<R = Obj>(data: DbUpdate): Promise<R> {

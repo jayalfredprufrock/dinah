@@ -13,7 +13,7 @@ export const resolveAttrType = (schema: TSchema, attrName: string): "S" | "N" =>
     return "S";
   }
 
-  if (T.IsNumber(schema) || T.IsLiteralNumber(schema)) {
+  if (T.IsNumber(schema) || T.IsLiteralNumber(schema) || T.IsInteger(schema)) {
     return "N";
   }
 
@@ -28,7 +28,7 @@ export const resolveAttrType = (schema: TSchema, attrName: string): "S" | "N" =>
   if (T.IsIntersect(schema) || T.IsUnion(schema)) {
     const schemas = T.IsUnion(schema) ? schema.anyOf : schema.allOf;
     const [firstType, ...otherTypes] = schemas.flatMap((s) => resolveAttrType(s, attrName));
-    if (!firstType || !otherTypes.every((t) => t !== firstType)) {
+    if (!firstType || otherTypes.some((t) => t !== firstType)) {
       throw new Error(`Attribute "${attrName}" type not consistent.`);
     }
 
