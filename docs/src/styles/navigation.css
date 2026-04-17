@@ -1,39 +1,38 @@
-
-.no-sidebar{
+.no-sidebar {
   @apply py-3;
 }
-.has-sidebar{
-  @apply  lg:z-100;
+.has-sidebar {
+  @apply lg:z-100;
 }
 
 /* navbar items */
-.has-sidebar .navbar{
-  @apply justify-stretch
+.has-sidebar .navbar {
+  @apply justify-stretch;
 }
-.has-sidebar .search-bar{
-  @apply xl:w-[350px] mr-4 lg:mr-12 
+.has-sidebar .search-bar {
+  @apply xl:w-[350px] mr-4 lg:mr-12;
 }
-.has-sidebar .navbar-actions{
+.has-sidebar .navbar-actions {
   @apply ml-auto;
 }
-.has-sidebar .search-bar button[data-open-modal]{
-  @apply md:h-[2.7rem] h-[2rem] rounded-full p-1 md:p-1.5 md:px-2.5 md:rounded-lg
+.has-sidebar .search-bar button[data-open-modal] {
+  @apply md:h-[2.7rem] h-[2rem] rounded-full p-1 md:p-1.5 md:px-2.5 md:rounded-lg;
 }
 .has-sidebar .search-bar span {
-  @apply hidden md:inline-block
+  @apply hidden md:inline-block;
 }
 .has-sidebar .search-bar kbd {
-  @apply hidden md:inline-block
+  @apply hidden md:inline-block;
 }
 
 .navbar {
-  @apply relative flex flex-wrap items-center justify-between ;
+  @apply relative flex flex-wrap items-center justify-between;
 }
-.navbar-scrolled{
+.navbar-scrolled {
   @apply bg-lightmode-body dark:bg-body;
 }
 .navbar-brand {
-  @apply  text-xl font-semibold flex items-center select-none;
+  @apply text-xl font-semibold flex items-center select-none;
   image {
     @apply max-h-full max-w-full;
   }
@@ -47,7 +46,7 @@
 }
 
 .nav-link {
-  @apply  hover:text-lightmode-primary! dark:hover:text-primary block p-3 cursor-pointer font-medium transition lg:px-2 lg:py-3 no-underline;
+  @apply hover:text-lightmode-primary! dark:hover:text-primary block p-3 cursor-pointer font-medium transition lg:px-2 lg:py-3 no-underline;
   color: color-mix(in srgb, var(--sl-color-white) 90%, transparent);
 }
 
@@ -116,5 +115,3 @@ input#nav-toggle:checked ~ #nav-menu {
     }
   }
 }
-
-

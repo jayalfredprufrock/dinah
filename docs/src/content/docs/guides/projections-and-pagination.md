@@ -14,13 +14,10 @@ Every read method on a `Repo` accepts an optional `projection: string[]` — an 
 const full = await postRepo.get({ postId: "p1" });
 
 // Pick<Post, 'postId' | 'title'> | undefined
-const narrow = await postRepo.get(
-  { postId: "p1" },
-  { projection: ["postId", "title"] },
-);
+const narrow = await postRepo.get({ postId: "p1" }, { projection: ["postId", "title"] });
 
-narrow?.title;   // OK
-narrow?.body;    // type error: Property 'body' does not exist
+narrow?.title; // OK
+narrow?.body; // type error: Property 'body' does not exist
 ```
 
 Projections work across `get`, `getOrThrow`, `query`, `queryPaged`, `scan`, `scanPaged`, `queryGsi`, `scanGsi`, `batchGet`, `batchGetOrThrow`, `trxGet`, and `trxGetOrThrow`.
@@ -31,7 +28,7 @@ If your Repo subclass overrides `transformItem` to add computed fields, projecte
 
 ### GSI projections
 
-GSIs have their own projection setting (`ALL`, `KEYS_ONLY`, or `INCLUDE`) that determines which attributes DynamoDB will return *regardless* of what you request. Dinah combines this with your explicit `projection`:
+GSIs have their own projection setting (`ALL`, `KEYS_ONLY`, or `INCLUDE`) that determines which attributes DynamoDB will return _regardless_ of what you request. Dinah combines this with your explicit `projection`:
 
 - **`ALL`** (default) — the full item type flows through. A `projection` option narrows further.
 - **`KEYS_ONLY`** — the return type is `Pick<Schema, TableKeys | GsiKeys>` and `transformItem` is skipped.
@@ -74,11 +71,7 @@ Every query and scan accepts `limit`. The paged form enforces it per page; the e
 For true resumable pagination across process boundaries, grab the last returned item's key attributes and pass them as `startKey` on the next call:
 
 ```typescript
-const firstPage = await userRepo.queryGsi(
-  "byRole",
-  { role: "admin" },
-  { limit: 50 },
-);
+const firstPage = await userRepo.queryGsi("byRole", { role: "admin" }, { limit: 50 });
 
 const last = firstPage.at(-1);
 
@@ -89,8 +82,8 @@ if (last) {
     {
       limit: 50,
       startKey: {
-        userId: last.userId,     // table PK
-        role: last.role,         // GSI PK
+        userId: last.userId, // table PK
+        role: last.role, // GSI PK
         createdAt: last.createdAt, // GSI SK
       },
     },

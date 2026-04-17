@@ -89,4 +89,3 @@ export async function createTables(db: Db): Promise<void> {
 export async function dropTables(db: Db): Promise<void> {
   await Promise.all(ALL_TABLES.map((t) => db.deleteTable(t.def.name).catch(() => {})));
 }
-

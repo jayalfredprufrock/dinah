@@ -13,11 +13,7 @@
   --sl-color-accent-high: color-mix(in srgb, var(--color-primary), #fff 70%);
 
   --sl-color-white: var(--color-light);
-  --sl-color-gray-1: color-mix(
-    in srgb,
-    var(--color-dark) 6%,
-    var(--color-light) 94%
-  ); /* #eeeeee */
+  --sl-color-gray-1: color-mix(in srgb, var(--color-dark) 6%, var(--color-light) 94%); /* #eeeeee */
   --sl-color-gray-2: color-mix(
     in srgb,
     var(--color-dark) 24%,
@@ -47,27 +43,15 @@
   /* color-dark: #040404 */
   --sl-color-black: var(--color-dark);
   --sl-sidebar-width: 320px;
-  --sl-color-hairline: color-mix(
-    in srgb,
-    var(--sl-color-white) 10%,
-    transparent
-  );
-  --sl-color-hairline-light:#252525;
+  --sl-color-hairline: color-mix(in srgb, var(--sl-color-white) 10%, transparent);
+  --sl-color-hairline-light: #252525;
 }
 
 /* Light mode colors. */
 :root[data-theme="light"] {
-  --sl-color-accent-low: color-mix(
-    in srgb,
-    var(--color-lightmode-primary),
-    #fff 70%
-  );
+  --sl-color-accent-low: color-mix(in srgb, var(--color-lightmode-primary), #fff 70%);
   --sl-color-accent: var(--color-lightmode-primary);
-  --sl-color-accent-high: color-mix(
-    in srgb,
-    var(--color-lightmode-primary),
-    #000 90%
-  );
+  --sl-color-accent-high: color-mix(in srgb, var(--color-lightmode-primary), #000 90%);
   /* color-lightmode-light: #181818 */
   --sl-color-white: var(--color-lightmode-light);
   --sl-color-gray-1: color-mix(
@@ -106,7 +90,6 @@
     var(--color-lightmode-light) 4%
   ); /* #f6f6f6 */
 
-
   --sl-color-black: var(--color-lightmode-dark);
 }
 
@@ -123,4 +106,3 @@
 @import "./navigation.css";
 @import "./components.css";
 @import "./button.css";
-

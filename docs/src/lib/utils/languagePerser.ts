@@ -6,5 +6,5 @@ export const getTranslations = async (lang: string) => {
     menu = await import(`../../config/menu.en.json`);
   }
 
-  return { ...menu.default,  };
+  return { ...menu.default };
 };

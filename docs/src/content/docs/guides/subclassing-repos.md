@@ -79,7 +79,7 @@ The return type of `transformItem` flows through every full-item read:
 const p = await postRepo.get({ postId: "p1" });
 // p is typed as (Post & { isDraft: boolean; url: string }) | undefined
 p?.isDraft; // OK
-p?.url;     // OK
+p?.url; // OK
 ```
 
 ### When transforms are skipped

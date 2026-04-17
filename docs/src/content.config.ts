@@ -4,7 +4,6 @@ import { docsSchema, i18nSchema } from "@astrojs/starlight/schema";
 import { glob } from "astro/loaders";
 import { defineCollection } from "astro:content";
 
-
 const ctaSection = defineCollection({
   loader: glob({
     pattern: "**/*.{md,mdx}",

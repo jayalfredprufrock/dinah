@@ -18,77 +18,121 @@ All three use the same operator set. Internally, Dinah compiles them to DynamoDB
 Passing a primitive value directly is shorthand for `$eq`:
 
 ```typescript
-{ status: "published" }
+{
+  status: "published";
+}
 // equivalent to:
-{ status: { $eq: "published" } }
+{
+  status: {
+    $eq: "published";
+  }
+}
 ```
 
 ## Comparison operators
 
 All of these take a primitive operand (string, number, boolean), or an `{ $path: "other.attribute" }` object to compare two attributes on the same item.
 
-| Operator | Meaning | DynamoDB |
-| --- | --- | --- |
-| `$eq` | equal | `=` |
-| `$ne` | not equal | `<>` |
-| `$gt` | greater than | `>` |
-| `$gte` | greater than or equal | `>=` |
-| `$lt` | less than | `<` |
-| `$lte` | less than or equal | `<=` |
+| Operator | Meaning               | DynamoDB |
+| -------- | --------------------- | -------- |
+| `$eq`    | equal                 | `=`      |
+| `$ne`    | not equal             | `<>`     |
+| `$gt`    | greater than          | `>`      |
+| `$gte`   | greater than or equal | `>=`     |
+| `$lt`    | less than             | `<`      |
+| `$lte`   | less than or equal    | `<=`     |
 
 ```typescript
-{ publishedAt: { $gt: 1700000000000 } }
-{ score: { $gte: { $path: "minScore" } } }
+{
+  publishedAt: {
+    $gt: 1700000000000;
+  }
+}
+{
+  score: {
+    $gte: {
+      $path: "minScore";
+    }
+  }
+}
 ```
 
 ## Set membership
 
-| Operator | Operand | Meaning |
-| --- | --- | --- |
-| `$in` | array | Attribute value is one of the array items. |
-| `$nin` | array | Attribute value is not any of the array items. |
+| Operator | Operand | Meaning                                        |
+| -------- | ------- | ---------------------------------------------- |
+| `$in`    | array   | Attribute value is one of the array items.     |
+| `$nin`   | array   | Attribute value is not any of the array items. |
 
 ```typescript
-{ status: { $in: ["draft", "published"] } }
-{ userId: { $nin: bannedIds } }
+{
+  status: {
+    $in: ["draft", "published"];
+  }
+}
+{
+  userId: {
+    $nin: bannedIds;
+  }
+}
 ```
 
 > `$in` with an empty array is currently a known edge case — prefer a non-empty array.
 
 ## String & collection operators
 
-| Operator | Operand | Meaning |
-| --- | --- | --- |
-| `$prefix` | string | `begins_with(attr, value)` — string starts with the operand. |
-| `$includes` | any | `contains(attr, value)` — string contains substring, or set/list contains value. |
+| Operator    | Operand | Meaning                                                                          |
+| ----------- | ------- | -------------------------------------------------------------------------------- |
+| `$prefix`   | string  | `begins_with(attr, value)` — string starts with the operand.                     |
+| `$includes` | any     | `contains(attr, value)` — string contains substring, or set/list contains value. |
 
 ```typescript
-{ postId: { $prefix: "post#" } }
-{ tags: { $includes: "typescript" } }
+{
+  postId: {
+    $prefix: "post#";
+  }
+}
+{
+  tags: {
+    $includes: "typescript";
+  }
+}
 ```
 
 ## Range
 
-| Operator | Operand | Meaning |
-| --- | --- | --- |
+| Operator   | Operand       | Meaning                                           |
+| ---------- | ------------- | ------------------------------------------------- |
 | `$between` | `[low, high]` | Attribute is between `low` and `high`, inclusive. |
 
 ```typescript
-{ publishedAt: { $between: [1700000000000, 1800000000000] } }
+{
+  publishedAt: {
+    $between: [1700000000000, 1800000000000];
+  }
+}
 ```
 
 ## Existence & type checks
 
-| Operator | Operand | Meaning |
-| --- | --- | --- |
-| `$exists` | boolean | `attribute_exists(attr)` / `attribute_not_exists(attr)`. |
-| `$type` | attribute type code | `attribute_type(attr, type)`. |
+| Operator  | Operand             | Meaning                                                  |
+| --------- | ------------------- | -------------------------------------------------------- |
+| `$exists` | boolean             | `attribute_exists(attr)` / `attribute_not_exists(attr)`. |
+| `$type`   | attribute type code | `attribute_type(attr, type)`.                            |
 
 Valid `$type` values: `"S"`, `"SS"`, `"N"`, `"NS"`, `"B"`, `"BS"`, `"BOOL"`, `"NULL"`, `"L"`, `"M"`.
 
 ```typescript
-{ archivedAt: { $exists: false } }
-{ metadata: { $type: "M" } }
+{
+  archivedAt: {
+    $exists: false;
+  }
+}
+{
+  metadata: {
+    $type: "M";
+  }
+}
 ```
 
 ## Compound operators
@@ -128,7 +172,13 @@ Any operand that takes a primitive can instead take an `{ $path: "otherAttr" }` 
 
 ```typescript
 // condition: updatedAt must be greater than createdAt
-{ updatedAt: { $gt: { $path: "createdAt" } } }
+{
+  updatedAt: {
+    $gt: {
+      $path: "createdAt";
+    }
+  }
+}
 ```
 
 ## Key conditions vs filter expressions

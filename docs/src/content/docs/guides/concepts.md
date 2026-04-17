@@ -34,14 +34,11 @@ See the [`Db` reference](/reference/db/) for all methods.
 `Table` is a declarative description of a single DynamoDB table. It pairs a typebox schema with a `TableDef` describing the name, primary key, optional sort key, GSIs, TTL attribute, and billing mode:
 
 ```typescript
-const UserTable = new Table(
-  Type.Object({ userId: Type.String(), email: Type.String() }),
-  {
-    name: "users",
-    partitionKey: "userId",
-    gsis: { byEmail: { partitionKey: "email" } },
-  },
-);
+const UserTable = new Table(Type.Object({ userId: Type.String(), email: Type.String() }), {
+  name: "users",
+  partitionKey: "userId",
+  gsis: { byEmail: { partitionKey: "email" } },
+});
 ```
 
 A `Table` holds no connection and does not talk to DynamoDB on its own. It is pure data: the schema and the definition. You pass it to `db.createRepo(table)` to get a typed `Repo`, or to `db.createTable(table)` to provision the physical table.
@@ -64,7 +61,7 @@ You usually get a `Repo` via `db.createRepo(table)`:
 
 ```typescript
 const userRepo = db.createRepo(UserTable);
-await userRepo.put({ userId: "u1", email: "alice@example.com", /* … */ });
+await userRepo.put({ userId: "u1", email: "alice@example.com" /* … */ });
 ```
 
 See the [`Repo` reference](/reference/repo/) for every method.

@@ -15,12 +15,12 @@ npm install dinah @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb
 
 Dinah declares the following as peer dependencies. Some are optional and only required if you use specific features:
 
-| Package | Required? | Used for |
-| --- | --- | --- |
-| `@aws-sdk/client-dynamodb` | Yes | Underlying DynamoDB client. |
-| `@aws-sdk/lib-dynamodb` | Yes | `DynamoDBDocumentClient` and command classes. |
-| `typebox` | Recommended | Defining schemas for `Table`. Required if you want type inference. |
-| `sift` | Optional | Client-side filtering for `condition` on `get` and `batchGet`, and for `trxGet` condition checks. |
+| Package                    | Required?   | Used for                                                                                          |
+| -------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
+| `@aws-sdk/client-dynamodb` | Yes         | Underlying DynamoDB client.                                                                       |
+| `@aws-sdk/lib-dynamodb`    | Yes         | `DynamoDBDocumentClient` and command classes.                                                     |
+| `typebox`                  | Recommended | Defining schemas for `Table`. Required if you want type inference.                                |
+| `sift`                     | Optional    | Client-side filtering for `condition` on `get` and `batchGet`, and for `trxGet` condition checks. |
 
 Install the optional ones as needed:
 

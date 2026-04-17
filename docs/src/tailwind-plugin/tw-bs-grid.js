@@ -74,15 +74,12 @@ module.exports = plugin.withOptions(() => {
 
     // gutters
     if (Object.keys(gridGutters).length) {
-      const gutterComponents = Object.entries(gridGutters).reduce(
-        (acc, [key, value]) => {
-          acc[`.g-${key}`] = { "--bs-gutter-x": value, "--bs-gutter-y": value };
-          acc[`.gx-${key}`] = { "--bs-gutter-x": value };
-          acc[`.gy-${key}`] = { "--bs-gutter-y": value };
-          return acc;
-        },
-        {},
-      );
+      const gutterComponents = Object.entries(gridGutters).reduce((acc, [key, value]) => {
+        acc[`.g-${key}`] = { "--bs-gutter-x": value, "--bs-gutter-y": value };
+        acc[`.gx-${key}`] = { "--bs-gutter-x": value };
+        acc[`.gy-${key}`] = { "--bs-gutter-y": value };
+        return acc;
+      }, {});
       addComponents(gutterComponents, { respectImportant });
     }
 

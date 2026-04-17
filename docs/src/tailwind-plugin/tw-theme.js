@@ -2,15 +2,13 @@ import plugin from "tailwindcss/plugin";
 import themeConfig from "../config/theme.json";
 
 // Helper to extract a clean font name.
-const findFont = (fontStr) =>
-  fontStr.replace(/\+/g, " ").replace(/:[^:]+/g, "");
+const findFont = (fontStr) => fontStr.replace(/\+/g, " ").replace(/:[^:]+/g, "");
 
 // Set font families dynamically, filtering out 'type' keys
 const fontFamilies = Object.entries(themeConfig.fonts.font_family)
   .filter(([key]) => !key.includes("type"))
   .reduce((acc, [key, font]) => {
-    acc[key] =
-      `${findFont(font)}, ${themeConfig.fonts.font_family[`${key}_type`] || "sans-serif"}`;
+    acc[key] = `${findFont(font)}, ${themeConfig.fonts.font_family[`${key}_type`] || "sans-serif"}`;
     return acc;
   }, {});
 
@@ -33,7 +31,6 @@ if (themeConfig.colors.lightmode?.text_color) {
   });
 }
 
-
 const getVars = (groups) => {
   const vars = {};
   groups.forEach(({ colors, prefix }) => {
@@ -47,7 +44,6 @@ const getVars = (groups) => {
 
 const defaultVars = getVars(defaultColorGroups);
 const darkVars = getVars(darkColorGroups);
-
 
 const baseSize = Number(themeConfig.fonts.font_size.base);
 const scale = Number(themeConfig.fonts.font_size.scale);
@@ -75,7 +71,6 @@ Object.entries(fontFamilies).forEach(([key, font]) => {
 
 const baseVars = { ...fontVars, ...defaultVars, ...darkVars };
 
-
 // Build a colorsMap including both sets
 const colorsMap = {};
 [...defaultColorGroups, ...darkColorGroups].forEach(({ colors, prefix }) => {
@@ -84,7 +79,6 @@ const colorsMap = {};
     colorsMap[prefix + cssKey] = `var(--color-${prefix}${cssKey})`;
   });
 });
-
 
 module.exports = plugin.withOptions(() => {
   return function ({ addBase, addUtilities, matchUtilities }) {

@@ -35,8 +35,8 @@ abstract class AbstractRepo<T extends Table> {
 - **`db: Db`** — the `Db` instance this repo was constructed with.
 - **`table: T`** — the `Table` this repo operates on.
 - **`tableName: string`** — the effective table name, `${db.config?.tableNamePrefix ?? ""}${table.def.name}`. Used by every method that talks to DynamoDB.
-- **`defaultPutData`** *(overridable)* — partial item merged under every `put` / `create` / `trxPut` / `trxCreate`. Default: `{}`.
-- **`defaultUpdateData`** *(overridable)* — partial update merged under every `update` / `trxUpdate`. Default: `{}`.
+- **`defaultPutData`** _(overridable)_ — partial item merged under every `put` / `create` / `trxPut` / `trxCreate`. Default: `{}`.
+- **`defaultUpdateData`** _(overridable)_ — partial update merged under every `update` / `trxUpdate`. Default: `{}`.
 
 ## Overridable hooks
 
@@ -353,7 +353,7 @@ Example:
 ```typescript
 await db.trxWrite(
   userRepo.trxUpdateRequest({ userId: "u1" }, { role: "admin" }),
-  postRepo.trxPutRequest({ postId: "p1", authorId: "u1", /* … */ }),
+  postRepo.trxPutRequest({ postId: "p1", authorId: "u1" /* … */ }),
   auditRepo.trxCreateRequest({ eventId: crypto.randomUUID(), type: "role-granted" }),
 );
 ```

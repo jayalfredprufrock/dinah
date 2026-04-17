@@ -47,8 +47,8 @@ const { items } = await db.batchGet({
   posts: { keys: [{ postId: "p1" }] },
 });
 
-items.users;  // Obj[]
-items.posts;  // Obj[]
+items.users; // Obj[]
+items.posts; // Obj[]
 ```
 
 ### Client-side conditions
@@ -63,8 +63,8 @@ Mix puts and deletes for a single table:
 
 ```typescript
 await userRepo.batchWrite([
-  { type: "PUT", item: { userId: "u4", /* … */ } },
-  { type: "PUT", item: { userId: "u5", /* … */ } },
+  { type: "PUT", item: { userId: "u4" /* … */ } },
+  { type: "PUT", item: { userId: "u5" /* … */ } },
   { type: "DELETE", key: { userId: "u3" } },
 ]);
 ```
@@ -96,7 +96,7 @@ Pass tagged request objects to `trxWrite`. Each request is typed against the Rep
 
 ```typescript
 await userRepo.trxWrite(
-  { type: "PUT", item: { userId: "u5", email: "eve@example.com", /* … */ } },
+  { type: "PUT", item: { userId: "u5", email: "eve@example.com" /* … */ } },
   { type: "UPDATE", key: { userId: "u1" }, update: { role: "superadmin" } },
   { type: "DELETE", key: { userId: "u2" } },
   { type: "CONDITION", key: { userId: "u3" }, condition: { banned: true } },
@@ -121,7 +121,7 @@ For transactions spanning multiple tables, use per-Repo `trx*Request` builders a
 ```typescript
 await db.trxWrite(
   userRepo.trxUpdateRequest({ userId: "u1" }, { role: "admin" }),
-  postRepo.trxPutRequest({ postId: "p1", authorId: "u1", /* … */ }),
+  postRepo.trxPutRequest({ postId: "p1", authorId: "u1" /* … */ }),
   auditRepo.trxPutRequest({ eventId: "e1", type: "role-changed" }),
 );
 ```
@@ -152,10 +152,10 @@ const [user, post] = await db.trxGet(
 
 ## When to use which
 
-| Scenario | Use |
-| --- | --- |
-| Independent writes, best-effort, at-most-25 per call | `batchWrite` |
-| Independent reads, best-effort, at-most-100 per call | `batchGet` |
-| All-or-nothing writes, or cross-item conditions | `trxWrite` |
-| Consistent multi-item read snapshot | `trxGet` |
-| Large collections (thousands of items) | Paginated `query` / `scan`, or chunked `batchWrite` |
+| Scenario                                             | Use                                                 |
+| ---------------------------------------------------- | --------------------------------------------------- |
+| Independent writes, best-effort, at-most-25 per call | `batchWrite`                                        |
+| Independent reads, best-effort, at-most-100 per call | `batchGet`                                          |
+| All-or-nothing writes, or cross-item conditions      | `trxWrite`                                          |
+| Consistent multi-item read snapshot                  | `trxGet`                                            |
+| Large collections (thousands of items)               | Paginated `query` / `scan`, or chunked `batchWrite` |

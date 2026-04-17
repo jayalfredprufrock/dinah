@@ -59,14 +59,14 @@ interface TableDef<T = any> {
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `name` | `string` | Physical table name. Will be prefixed by `db.config.tableNamePrefix` at Repo runtime. |
-| `partitionKey` | string (field name) | Required. Must be a `string` or `number` field on the schema. |
-| `sortKey` | string (field name) | Optional. Must be a `string` or `number` field on the schema. |
-| `gsis` | `Record<string, Gsi>` | Optional. GSI definitions keyed by index name. |
-| `ttlAttribute` | string (field name) | Optional. Must be a `number` field (can be optional in the schema). `createTable` enables TTL on this attribute. |
-| `billingMode` | `"PAY_PER_REQUEST"` \| `"PROVISIONED"` | Optional. Used by `createTable`. |
+| Field          | Type                                   | Description                                                                                                      |
+| -------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `name`         | `string`                               | Physical table name. Will be prefixed by `db.config.tableNamePrefix` at Repo runtime.                            |
+| `partitionKey` | string (field name)                    | Required. Must be a `string` or `number` field on the schema.                                                    |
+| `sortKey`      | string (field name)                    | Optional. Must be a `string` or `number` field on the schema.                                                    |
+| `gsis`         | `Record<string, Gsi>`                  | Optional. GSI definitions keyed by index name.                                                                   |
+| `ttlAttribute` | string (field name)                    | Optional. Must be a `number` field (can be optional in the schema). `createTable` enables TTL on this attribute. |
+| `billingMode`  | `"PAY_PER_REQUEST"` \| `"PROVISIONED"` | Optional. Used by `createTable`.                                                                                 |
 
 ### `Gsi`
 
@@ -78,11 +78,11 @@ interface Gsi<T> {
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `partitionKey` | `string \| string[]` | Required. A field name or array of up to 4 field names ([multi-key GSI](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.html)). Each must be `string` or `number`. |
-| `sortKey` | `string \| string[]` | Optional. A field name or array of up to 4 field names. Each must be `string` or `number`. |
-| `projection` | `"ALL"` (default) \| `"KEYS_ONLY"` \| `string[]` | What DynamoDB stores in the index. The type of query/scan results is narrowed accordingly. |
+| Field          | Type                                             | Description                                                                                                                                                                             |
+| -------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `partitionKey` | `string \| string[]`                             | Required. A field name or array of up to 4 field names ([multi-key GSI](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.html)). Each must be `string` or `number`. |
+| `sortKey`      | `string \| string[]`                             | Optional. A field name or array of up to 4 field names. Each must be `string` or `number`.                                                                                              |
+| `projection`   | `"ALL"` (default) \| `"KEYS_ONLY"` \| `string[]` | What DynamoDB stores in the index. The type of query/scan results is narrowed accordingly.                                                                                              |
 
 ## Type-level key validation
 
@@ -91,8 +91,8 @@ All key references on `TableDef` are validated at compile time:
 ```typescript
 new Table(Schema, {
   name: "t",
-  partitionKey: "nope",      // ts error: field doesn't exist on schema
-  sortKey: "createdAt",      // ts error: createdAt is a boolean, not string/number
+  partitionKey: "nope", // ts error: field doesn't exist on schema
+  sortKey: "createdAt", // ts error: createdAt is a boolean, not string/number
   gsis: {
     byStatus: {
       partitionKey: "status",

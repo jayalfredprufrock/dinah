@@ -129,6 +129,7 @@ import Accordion from "~/components/user-components/Accordion.astro";
   </NewCard>
 
 {" "}
+
 <NewCard title="Custom Components" icon="document">
   Rich set of components for beautiful documentation
 </NewCard>
@@ -205,11 +206,7 @@ Add custom styles to `src/styles/global.css`:
 
 /* Custom component styles */
 .custom-hero {
-  background: linear-gradient(
-    45deg,
-    var(--custom-primary),
-    var(--custom-accent)
-  );
+  background: linear-gradient(45deg, var(--custom-primary), var(--custom-accent));
 }
 ```
 

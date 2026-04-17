@@ -44,24 +44,24 @@ const PostTable = new Table(
 
 ## `TableDef` options
 
-| Option | Required | Description |
-| --- | --- | --- |
-| `name` | Yes | Physical table name. The `Repo` will prefix this with `db.config.tableNamePrefix` if one is configured. |
-| `partitionKey` | Yes | Name of a `string` or `number` field on the schema. Validated at the type level. |
-| `sortKey` | No | Name of a `string` or `number` field. |
-| `gsis` | No | Map of GSI name → GSI definition. See [GSIs](#gsis) below. |
-| `ttlAttribute` | No | Name of a `number` field on the schema. Enabled when you call `table.createTable(client)`. |
-| `billingMode` | No | `"PAY_PER_REQUEST"` or `"PROVISIONED"`. Used by `createTable`. |
+| Option         | Required | Description                                                                                             |
+| -------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `name`         | Yes      | Physical table name. The `Repo` will prefix this with `db.config.tableNamePrefix` if one is configured. |
+| `partitionKey` | Yes      | Name of a `string` or `number` field on the schema. Validated at the type level.                        |
+| `sortKey`      | No       | Name of a `string` or `number` field.                                                                   |
+| `gsis`         | No       | Map of GSI name → GSI definition. See [GSIs](#gsis) below.                                              |
+| `ttlAttribute` | No       | Name of a `number` field on the schema. Enabled when you call `table.createTable(client)`.              |
+| `billingMode`  | No       | `"PAY_PER_REQUEST"` or `"PROVISIONED"`. Used by `createTable`.                                          |
 
 ## GSIs
 
 Each entry in `gsis` is a `Gsi` object:
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `partitionKey` | Yes | A field name or array of up to 4 field names. Each must be `string` or `number`. |
-| `sortKey` | No | A field name or array of up to 4 field names. Each must be `string` or `number`. |
-| `projection` | No | `"ALL"` (default), `"KEYS_ONLY"`, or an array of attribute names to include. |
+| Field          | Required | Description                                                                      |
+| -------------- | -------- | -------------------------------------------------------------------------------- |
+| `partitionKey` | Yes      | A field name or array of up to 4 field names. Each must be `string` or `number`. |
+| `sortKey`      | No       | A field name or array of up to 4 field names. Each must be `string` or `number`. |
+| `projection`   | No       | `"ALL"` (default), `"KEYS_ONLY"`, or an array of attribute names to include.     |
 
 ### Multi-key GSIs
 
@@ -175,8 +175,8 @@ await repo.queryGsi(
   { authorId: "u1" },
   {
     startKey: {
-      postId: "p42",     // table PK
-      authorId: "u1",    // GSI PK
+      postId: "p42", // table PK
+      authorId: "u1", // GSI PK
       publishedAt: 1700, // GSI SK
     },
   },
