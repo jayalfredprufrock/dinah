@@ -4,7 +4,7 @@ import type {
   ProjectionType,
 } from "@aws-sdk/client-dynamodb";
 import { type TSchema } from "typebox";
-import * as T from "typebox";
+import * as T from "typebox/type";
 import type { Obj } from "./types";
 import type { Table } from "./table";
 
