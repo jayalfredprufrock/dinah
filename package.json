@@ -49,16 +49,16 @@
     "prepare": "vp config"
   },
   "devDependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1027.0",
-    "@aws-sdk/lib-dynamodb": "^3.1027.0",
+    "@aws-sdk/client-dynamodb": "^3.1035.0",
+    "@aws-sdk/lib-dynamodb": "^3.1035.0",
     "@semantic-release/exec": "^7.1.0",
     "@tsconfig/node24": "^24.0.4",
-    "@types/node": "^24.12.0",
+    "@types/node": "^24.12.2",
     "@typescript/native-preview": "7.0.0-dev.20260328.1",
     "aws-cdk-lib": "^2.250.0",
     "semantic-release": "^25.0.3",
-    "typebox": "^1.1.14",
-    "vite-plus": "^0.1.14"
+    "typebox": "^1.1.32",
+    "vite-plus": "^0.1.19"
   },
   "peerDependencies": {
     "@aws-sdk/client-dynamodb": "^3.1027.0",
