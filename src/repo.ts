@@ -319,7 +319,12 @@ export abstract class AbstractRepo<T extends Table> {
     options?: O,
   ): Promise<RepoTrxGetResult<this, O>> {
     const items = await this.db.trxGet(
-      ...keys.map((key) => ({ table: this.tableName, key: this.extractKey(key), ...options })),
+      ...keys.map((key) => ({
+        table: this.tableName,
+        key: this.extractKey(key),
+        // TODO: fix this as any assertion
+        ...(options as any),
+      })),
     );
     return items.map((item: any) => item && this.applyTransformIfNeeded(item, options)) as any;
   }
@@ -329,7 +334,12 @@ export abstract class AbstractRepo<T extends Table> {
     options?: O,
   ): Promise<RepoTrxGetOrThrowResult<this, O>> {
     const items = await this.db.trxGetOrThrow(
-      ...keys.map((key) => ({ table: this.tableName, key: this.extractKey(key), ...options })),
+      ...keys.map((key) => ({
+        table: this.tableName,
+        key: this.extractKey(key),
+        // TODO: fix this as any assertion
+        ...(options as any),
+      })),
     );
     return this.applyTransformsIfNeeded(items, options);
   }
@@ -397,7 +407,8 @@ export abstract class AbstractRepo<T extends Table> {
     key: RepoKey<this>,
     options?: O,
   ): DbTrxGetRequest<RepoGetOrThrowResult<this, O>> {
-    return { table: this.tableName, key: this.extractKey(key), ...options };
+    // TODO: fix this as any assertion
+    return { table: this.tableName, key: this.extractKey(key), ...(options as any) };
   }
 
   trxDeleteRequest(

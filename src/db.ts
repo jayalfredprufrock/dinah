@@ -12,7 +12,6 @@ import {
 //import { DynamoDBStreams } from '@aws-sdk/client-dynamodb-streams';
 import type { TransactGetCommandInput, TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
 import * as Lib from "@aws-sdk/lib-dynamodb";
-import sift from "sift";
 import { ExpressionBuilder } from "./expression-builder";
 import { Repo } from "./repo";
 import type { Table } from "./table";
@@ -554,11 +553,11 @@ export class Db {
 
     return (
       (output.Responses?.map((response, i) => {
-        if (requests[i]?.condition && !sift(requests[i].condition)(response.Item)) {
-          return undefined;
-        }
+        if (!response.Item) return;
 
-        return response.Item;
+        if (!requests[i]?.filter) return response.Item;
+
+        return requests[i].filter(response.Item) ? response.Item : undefined;
       }) as DbTrxGetResult<R>) ?? []
     );
   }

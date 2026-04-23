@@ -114,7 +114,7 @@ export interface DbTrxGetRequest<T = Obj> {
   table: string;
   key: Obj;
   projection?: string[];
-  condition?: Obj;
+  filter?: (item: Obj) => boolean;
 }
 
 export type DbTrxGetResult<R extends DbTrxGetRequest[]> = {
@@ -604,7 +604,7 @@ export interface RepoExistsOptions<R extends AbstractRepo<any>> {
 
 export interface RepoTrxGetOptions<R extends AbstractRepo<any>> {
   projection?: Projection<R>;
-  condition?: Condition<R["$schema"]>;
+  filter?: (item: R["$schema"]) => boolean;
 }
 
 export type RepoTrxGetResult<R extends AbstractRepo<any>, O extends RepoTrxGetOptions<R>> = (
