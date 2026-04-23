@@ -12,17 +12,17 @@ export interface DbListTables {
   limit?: number;
 }
 
-export interface DbGet {
+export interface DbGet<R = Obj> {
   table: string;
   key: Obj;
   consistent?: boolean;
   projection?: string[];
-  condition?: Obj;
+  filter?: (item: R) => boolean;
 }
 
-export interface DbPut {
+export interface DbPut<R = Obj> {
   table: string;
-  item: Obj;
+  item: R;
   returnOld?: boolean;
   condition?: Obj;
 }
@@ -34,18 +34,10 @@ export interface DbUpdate {
   condition?: Obj;
 }
 
-export interface DbCreate {
+export interface DbCreate<R = Obj> {
   table: string;
   partitionKeyName: string;
-  item: Obj;
-  condition?: Obj;
-}
-
-export interface DbUpsert {
-  table: string;
-  key: Obj;
-  update: Obj;
-  item: Obj;
+  item: R;
   condition?: Obj;
 }
 
@@ -91,7 +83,7 @@ export interface DbBatchGetRequest {
   keys: Obj[];
   consistent?: boolean;
   projection?: string[];
-  condition?: Obj;
+  filter?: (item: Obj) => boolean;
 }
 
 export type DbBatchGet = Obj<DbBatchGetRequest>;
@@ -430,7 +422,7 @@ export type ApplyGsiProjection<R extends AbstractRepo<any>, O, G extends string>
 export interface RepoGetOptions<R extends AbstractRepo<any>> {
   consistent?: boolean;
   projection?: Projection<R>;
-  condition?: Condition<R["$schema"]>;
+  filter?: (item: R["$schema"]) => boolean;
 }
 
 export type RepoGetResult<R extends AbstractRepo<any>, O extends RepoGetOptions<R>> =
@@ -666,7 +658,7 @@ export type RepoTrxWriteRequest<R extends AbstractRepo<any>> =
 export interface RepoBatchGetOptions<R extends AbstractRepo<any>> {
   consistent?: boolean;
   projection?: Projection<R>;
-  condition?: Condition<R["$schema"]>;
+  filter?: (item: R["$schema"]) => boolean;
 }
 
 export type RepoBatchGetResult<R extends AbstractRepo<any>, O extends RepoBatchGetOptions<R>> = {

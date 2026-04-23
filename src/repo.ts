@@ -275,7 +275,8 @@ export abstract class AbstractRepo<T extends Table> {
     options?: O,
   ): Promise<RepoBatchGetResult<this, O>> {
     const { items, unprocessed } = await this.db.batchGet({
-      [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...options },
+      // TODO: fix this as any assertion
+      [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...(options as any) },
     });
     const tableItems = items[this.tableName];
     return {
@@ -289,7 +290,8 @@ export abstract class AbstractRepo<T extends Table> {
     options?: O,
   ): Promise<RepoBatchGetOrThrowResult<this, O>> {
     const result = await this.db.batchGetOrThrow({
-      [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...options },
+      // TODO: fix this as any assertion
+      [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...(options as any) },
     });
     return this.applyTransformsIfNeeded(result[this.tableName] ?? [], options);
   }

@@ -106,7 +106,7 @@ export class Db {
     return tables;
   }
 
-  async get<R = Obj>(data: DbGet): Promise<R | undefined> {
+  async get<R extends Obj = Obj>(data: DbGet<R>): Promise<R | undefined> {
     const exp = new ExpressionBuilder();
 
     const input = new Lib.GetCommand({
@@ -119,16 +119,14 @@ export class Db {
 
     const output = await this.client.send(input);
 
-    if (output.Item && data.condition) {
-      if (!sift(data.condition)(output.Item)) {
-        return undefined;
-      }
+    if (output.Item && data.filter && !data.filter(output.Item as R)) {
+      return undefined;
     }
 
     return output.Item as R;
   }
 
-  async getOrThrow<R = Obj>(data: DbGet): Promise<R> {
+  async getOrThrow<R extends Obj = Obj>(data: DbGet<R>): Promise<R> {
     const item = await this.get(data);
     if (!item) {
       throw new Error(`Item not found in "${data.table}" table.`);
@@ -136,10 +134,10 @@ export class Db {
     return item as R;
   }
 
-  async put<R = Obj>(data: DbPut): Promise<R> {
+  async put<R extends Obj = Obj>(data: DbPut<R>): Promise<R> {
     const exp = new ExpressionBuilder();
 
-    const item = removeUndefined(data.item);
+    const item = removeUndefined(data.item as R);
 
     const input = new Lib.PutCommand({
       TableName: data.table,
@@ -156,7 +154,7 @@ export class Db {
     return (data.returnOld ? output.Attributes : item) as R;
   }
 
-  async update<R = Obj>(data: DbUpdate): Promise<R> {
+  async update<R extends Obj = Obj>(data: DbUpdate): Promise<R> {
     const exp = new ExpressionBuilder();
 
     const condition = {
@@ -185,7 +183,7 @@ export class Db {
     return output.Attributes as R;
   }
 
-  async delete<R = Obj>(data: DbDelete): Promise<R | undefined> {
+  async delete<R extends Obj = Obj>(data: DbDelete): Promise<R | undefined> {
     const exp = new ExpressionBuilder();
 
     const input = new Lib.DeleteCommand({
@@ -203,7 +201,7 @@ export class Db {
     return output.Attributes as R | undefined;
   }
 
-  async deleteOrThrow<R = Obj>(data: DbDelete): Promise<R> {
+  async deleteOrThrow<R extends Obj = Obj>(data: DbDelete): Promise<R> {
     const item = await this.delete<R>(data);
     if (!item) {
       throw new Error(`Item not found in "${data.table}" table.`);
@@ -211,7 +209,7 @@ export class Db {
     return item;
   }
 
-  async *queryPaged<R = Obj>(data: DbQuery): AsyncGenerator<R[]> {
+  async *queryPaged<R extends Obj = Obj>(data: DbQuery): AsyncGenerator<R[]> {
     const exp = new ExpressionBuilder();
 
     let lastEvaluatedKey = data.startKey;
@@ -239,7 +237,7 @@ export class Db {
     } while (lastEvaluatedKey);
   }
 
-  async query<R = Obj>(data: DbQuery): Promise<R[]> {
+  async query<R extends Obj = Obj>(data: DbQuery): Promise<R[]> {
     const items: Obj[] = [];
 
     for await (const page of this.queryPaged(data)) {
@@ -249,7 +247,7 @@ export class Db {
     return items as R[];
   }
 
-  async *scanPaged<R = Obj>(data: DbScan): AsyncGenerator<R[]> {
+  async *scanPaged<R extends Obj = Obj>(data: DbScan): AsyncGenerator<R[]> {
     const exp = new ExpressionBuilder();
 
     const totalSegments = data.parallel ?? 1;
@@ -291,7 +289,7 @@ export class Db {
     } while (lastEvaluatedKeys.some((key) => key !== null));
   }
 
-  async scan<R = Obj>(data: DbScan): Promise<R[]> {
+  async scan<R extends Obj = Obj>(data: DbScan): Promise<R[]> {
     const items: R[] = [];
 
     for await (const page of this.scanPaged(data)) {
@@ -331,7 +329,6 @@ export class Db {
     const tableData = Object.fromEntries(
       Object.entries(data).map(([table, request]) => {
         const exp = new ExpressionBuilder();
-        const sifter = request?.condition ? sift(request?.condition) : undefined;
 
         result.items[table] = [];
 
@@ -345,7 +342,7 @@ export class Db {
             },
             keyNames: Object.keys(request.keys.at(0) ?? {}),
             itemIndexMap: new Map<string, number>(),
-            sifter,
+            filter: request.filter,
           },
         ];
       }),
@@ -382,15 +379,11 @@ export class Db {
         //just to appease typescript
         if (!result.items[table]) continue;
 
-        for (const item of items) {
-          // items that fail the condition are treated the same as non-existent keys,
-          // i.e. they are not present in items/unprocessed arrays
-          if (tableData[table]?.sifter && !tableData[table].sifter(item)) {
-            continue;
-          }
+        const filteredItems = tableData[table]?.filter
+          ? items.filter(tableData[table].filter)
+          : items;
 
-          result.items[table].push(item);
-        }
+        result.items[table].push(...filteredItems);
       }
 
       // handle unprocessed requests
