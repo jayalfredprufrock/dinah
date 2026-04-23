@@ -50,11 +50,14 @@ describe("put and get", () => {
     expect((result as any).role).toBeUndefined();
   });
 
-  test("get with condition filters result", async () => {
-    const match = await userRepo.get({ userId: "u1" }, { condition: { role: "admin" } });
+  test("get with filter filters result", async () => {
+    const match = await userRepo.get({ userId: "u1" }, { filter: (item) => item.role === "admin" });
     expect(match).toBeDefined();
 
-    const noMatch = await userRepo.get({ userId: "u1" }, { condition: { role: "viewer" } });
+    const noMatch = await userRepo.get(
+      { userId: "u1" },
+      { filter: (item) => item.role === "viewer" },
+    );
     expect(noMatch).toBeUndefined();
   });
 });
