@@ -12,12 +12,12 @@ export interface DbListTables {
   limit?: number;
 }
 
-export interface DbGet<R = Obj> {
+export interface DbGet {
   table: string;
   key: Obj;
   consistent?: boolean;
   projection?: string[];
-  filter?: (item: R) => boolean;
+  filter?: (item: Obj) => boolean;
 }
 
 export interface DbPut<R = Obj> {

@@ -105,7 +105,7 @@ export class Db {
     return tables;
   }
 
-  async get<R extends Obj = Obj>(data: DbGet): Promise<R | undefined> {
+  async get<R = Obj>(data: DbGet): Promise<R | undefined> {
     const exp = new ExpressionBuilder();
 
     const input = new Lib.GetCommand({
@@ -118,7 +118,7 @@ export class Db {
 
     const output = await this.client.send(input);
 
-    if (output.Item && data.filter && !data.filter(output.Item as R)) {
+    if (output.Item && data.filter && !data.filter(output.Item)) {
       return undefined;
     }
 
