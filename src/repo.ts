@@ -275,8 +275,7 @@ export abstract class AbstractRepo<T extends Table> {
     options?: O,
   ): Promise<RepoBatchGetResult<this, O>> {
     const { items, unprocessed } = await this.db.batchGet({
-      // TODO: fix this as any assertion
-      [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...(options as any) },
+      [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...options },
     });
     const tableItems = items[this.tableName];
     return {
@@ -290,8 +289,7 @@ export abstract class AbstractRepo<T extends Table> {
     options?: O,
   ): Promise<RepoBatchGetOrThrowResult<this, O>> {
     const result = await this.db.batchGetOrThrow({
-      // TODO: fix this as any assertion
-      [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...(options as any) },
+      [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...options },
     });
     return this.applyTransformsIfNeeded(result[this.tableName] ?? [], options);
   }
@@ -322,8 +320,7 @@ export abstract class AbstractRepo<T extends Table> {
       ...keys.map((key) => ({
         table: this.tableName,
         key: this.extractKey(key),
-        // TODO: fix this as any assertion
-        ...(options as any),
+        ...options,
       })),
     );
     return items.map((item: any) => item && this.applyTransformIfNeeded(item, options)) as any;
@@ -337,8 +334,7 @@ export abstract class AbstractRepo<T extends Table> {
       ...keys.map((key) => ({
         table: this.tableName,
         key: this.extractKey(key),
-        // TODO: fix this as any assertion
-        ...(options as any),
+        ...options,
       })),
     );
     return this.applyTransformsIfNeeded(items, options);
@@ -407,8 +403,7 @@ export abstract class AbstractRepo<T extends Table> {
     key: RepoKey<this>,
     options?: O,
   ): DbTrxGetRequest<RepoGetOrThrowResult<this, O>> {
-    // TODO: fix this as any assertion
-    return { table: this.tableName, key: this.extractKey(key), ...(options as any) };
+    return { table: this.tableName, key: this.extractKey(key), ...options };
   }
 
   trxDeleteRequest(

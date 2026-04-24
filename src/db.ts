@@ -125,18 +125,18 @@ export class Db {
     return output.Item as R;
   }
 
-  async getOrThrow<R extends Obj = Obj>(data: DbGet): Promise<R> {
-    const item = await this.get(data);
+  async getOrThrow<R = Obj>(data: DbGet): Promise<R> {
+    const item = await this.get<R>(data);
     if (!item) {
       throw new Error(`Item not found in "${data.table}" table.`);
     }
-    return item as R;
+    return item;
   }
 
-  async put<R extends Obj = Obj>(data: DbPut): Promise<R> {
+  async put<R = Obj>(data: DbPut): Promise<R> {
     const exp = new ExpressionBuilder();
 
-    const item = removeUndefined(data.item as R);
+    const item = removeUndefined(data.item);
 
     const input = new Lib.PutCommand({
       TableName: data.table,
@@ -153,7 +153,7 @@ export class Db {
     return (data.returnOld ? output.Attributes : item) as R;
   }
 
-  async update<R extends Obj = Obj>(data: DbUpdate): Promise<R> {
+  async update<R = Obj>(data: DbUpdate): Promise<R> {
     const exp = new ExpressionBuilder();
 
     const condition = {
@@ -182,7 +182,7 @@ export class Db {
     return output.Attributes as R;
   }
 
-  async delete<R extends Obj = Obj>(data: DbDelete): Promise<R | undefined> {
+  async delete<R = Obj>(data: DbDelete): Promise<R | undefined> {
     const exp = new ExpressionBuilder();
 
     const input = new Lib.DeleteCommand({
@@ -200,7 +200,7 @@ export class Db {
     return output.Attributes as R | undefined;
   }
 
-  async deleteOrThrow<R extends Obj = Obj>(data: DbDelete): Promise<R> {
+  async deleteOrThrow<R = Obj>(data: DbDelete): Promise<R> {
     const item = await this.delete<R>(data);
     if (!item) {
       throw new Error(`Item not found in "${data.table}" table.`);
@@ -208,7 +208,7 @@ export class Db {
     return item;
   }
 
-  async *queryPaged<R extends Obj = Obj>(data: DbQuery): AsyncGenerator<R[]> {
+  async *queryPaged<R = Obj>(data: DbQuery): AsyncGenerator<R[]> {
     const exp = new ExpressionBuilder();
 
     let lastEvaluatedKey = data.startKey;
@@ -236,7 +236,7 @@ export class Db {
     } while (lastEvaluatedKey);
   }
 
-  async query<R extends Obj = Obj>(data: DbQuery): Promise<R[]> {
+  async query<R = Obj>(data: DbQuery): Promise<R[]> {
     const items: Obj[] = [];
 
     for await (const page of this.queryPaged(data)) {
@@ -246,7 +246,7 @@ export class Db {
     return items as R[];
   }
 
-  async *scanPaged<R extends Obj = Obj>(data: DbScan): AsyncGenerator<R[]> {
+  async *scanPaged<R = Obj>(data: DbScan): AsyncGenerator<R[]> {
     const exp = new ExpressionBuilder();
 
     const totalSegments = data.parallel ?? 1;
@@ -288,7 +288,7 @@ export class Db {
     } while (lastEvaluatedKeys.some((key) => key !== null));
   }
 
-  async scan<R extends Obj = Obj>(data: DbScan): Promise<R[]> {
+  async scan<R = Obj>(data: DbScan): Promise<R[]> {
     const items: R[] = [];
 
     for await (const page of this.scanPaged(data)) {

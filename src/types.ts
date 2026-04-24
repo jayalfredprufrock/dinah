@@ -17,7 +17,7 @@ export interface DbGet {
   key: Obj;
   consistent?: boolean;
   projection?: string[];
-  filter?: (item: Obj) => boolean;
+  filter?: (item: any) => boolean;
 }
 
 export interface DbPut<R = Obj> {
@@ -83,7 +83,7 @@ export interface DbBatchGetRequest {
   keys: Obj[];
   consistent?: boolean;
   projection?: string[];
-  filter?: (item: Obj) => boolean;
+  filter?: (item: any) => boolean;
 }
 
 export type DbBatchGet = Obj<DbBatchGetRequest>;
@@ -114,7 +114,7 @@ export interface DbTrxGetRequest<T = Obj> {
   table: string;
   key: Obj;
   projection?: string[];
-  filter?: (item: Obj) => boolean;
+  filter?: (item: any) => boolean;
 }
 
 export type DbTrxGetResult<R extends DbTrxGetRequest[]> = {
