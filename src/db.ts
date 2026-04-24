@@ -105,7 +105,7 @@ export class Db {
     return tables;
   }
 
-  async get<R extends Obj = Obj>(data: DbGet<R>): Promise<R | undefined> {
+  async get<R extends Obj = Obj>(data: DbGet): Promise<R | undefined> {
     const exp = new ExpressionBuilder();
 
     const input = new Lib.GetCommand({
@@ -125,7 +125,7 @@ export class Db {
     return output.Item as R;
   }
 
-  async getOrThrow<R extends Obj = Obj>(data: DbGet<R>): Promise<R> {
+  async getOrThrow<R extends Obj = Obj>(data: DbGet): Promise<R> {
     const item = await this.get(data);
     if (!item) {
       throw new Error(`Item not found in "${data.table}" table.`);
@@ -133,7 +133,7 @@ export class Db {
     return item as R;
   }
 
-  async put<R extends Obj = Obj>(data: DbPut<R>): Promise<R> {
+  async put<R extends Obj = Obj>(data: DbPut): Promise<R> {
     const exp = new ExpressionBuilder();
 
     const item = removeUndefined(data.item as R);

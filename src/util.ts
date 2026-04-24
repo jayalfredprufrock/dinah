@@ -3,17 +3,22 @@ import type {
   CreateTableCommandInput,
   ProjectionType,
 } from "@aws-sdk/client-dynamodb";
-import { type TSchema } from "typebox";
+import { type TSchema, type TEnumValue } from "typebox";
 import * as T from "typebox/type";
 import type { Obj } from "./types";
 import type { Table } from "./table";
 
-export const resolveAttrType = (schema: TSchema, attrName: string): "S" | "N" => {
-  if (T.IsString(schema) || T.IsLiteralString(schema)) {
+export const resolveAttrType = (schema: TSchema | TEnumValue, attrName: string): "S" | "N" => {
+  if (T.IsString(schema) || T.IsLiteralString(schema) || typeof schema === "string") {
     return "S";
   }
 
-  if (T.IsNumber(schema) || T.IsLiteralNumber(schema) || T.IsInteger(schema)) {
+  if (
+    T.IsNumber(schema) ||
+    T.IsLiteralNumber(schema) ||
+    T.IsInteger(schema) ||
+    typeof schema === "number"
+  ) {
     return "N";
   }
 
@@ -25,8 +30,12 @@ export const resolveAttrType = (schema: TSchema, attrName: string): "S" | "N" =>
     return resolveAttrType(attrSchema, attrName);
   }
 
-  if (T.IsIntersect(schema) || T.IsUnion(schema)) {
-    const schemas = T.IsUnion(schema) ? schema.anyOf : schema.allOf;
+  if (T.IsEnum(schema) || T.IsIntersect(schema) || T.IsUnion(schema)) {
+    const schemas = T.IsEnum(schema)
+      ? schema.enum
+      : T.IsUnion(schema)
+        ? schema.anyOf
+        : schema.allOf;
     const [firstType, ...otherTypes] = schemas.flatMap((s) => resolveAttrType(s, attrName));
     if (!firstType || otherTypes.some((t) => t !== firstType)) {
       throw new Error(`Attribute "${attrName}" type not consistent.`);
