@@ -1001,3 +1001,100 @@ describe("condition typing — usage in repo methods", () => {
     await condRepo.exists({ filter: { active: true } });
   });
 });
+
+// ── Update expression typing ─────────────────────────────────────────────────
+
+describe("update expression typing — valid expressions", () => {
+  test("direct value assignment", async () => {
+    await condRepo.update({ userId: "u1" }, { age: 26 });
+  });
+
+  test("$plus on number", async () => {
+    await condRepo.update({ userId: "u1" }, { age: { $plus: 5 } });
+  });
+
+  test("$minus on number", async () => {
+    await condRepo.update({ userId: "u1" }, { age: { $minus: 3 } });
+  });
+
+  test("$plus advanced form with $path", async () => {
+    await condRepo.update({ userId: "u1" }, { age: { $plus: [{ $path: "score" }, 5] } });
+  });
+
+  test("$append on array", async () => {
+    await condRepo.update({ userId: "u1" }, { tags: { $append: "new" } });
+  });
+
+  test("$prepend array of elements", async () => {
+    await condRepo.update({ userId: "u1" }, { tags: { $prepend: ["a", "b"] } });
+  });
+
+  test("$set explicit", async () => {
+    await condRepo.update({ userId: "u1" }, { name: { $set: "Bob" } });
+  });
+
+  test("$remove", async () => {
+    await condRepo.update({ userId: "u1" }, { age: { $remove: true } });
+  });
+
+  test("undefined removes attribute", async () => {
+    await condRepo.update({ userId: "u1" }, { age: undefined });
+  });
+
+  test("$ifNotExists with value", async () => {
+    await condRepo.update({ userId: "u1" }, { age: { $ifNotExists: 42 } });
+  });
+
+  test("$ifNotExists with [field, value]", async () => {
+    await condRepo.update({ userId: "u1" }, { age: { $ifNotExists: ["score", 42] } });
+  });
+
+  test("$setAdd on array field", async () => {
+    await condRepo.update({ userId: "u1" }, { tags: { $setAdd: ["new"] } });
+  });
+
+  test("$setDel on array field", async () => {
+    await condRepo.update({ userId: "u1" }, { tags: { $setDel: ["old"] } });
+  });
+
+  test("$between on number via $plus", async () => {
+    await condRepo.update({ userId: "u1" }, { age: { $plus: [5, { $path: "score" }] } });
+  });
+});
+
+describe("update expression typing — invalid expressions", () => {
+  test("rejects $plus on string", async () => {
+    // @ts-expect-error — $plus is only for numbers
+    await condRepo.update({ userId: "u1" }, { name: { $plus: 5 } });
+  });
+
+  test("rejects $append on number", async () => {
+    // @ts-expect-error — $append is only for arrays
+    await condRepo.update({ userId: "u1" }, { age: { $append: 5 } });
+  });
+
+  test("rejects wrong value type in $set", async () => {
+    // @ts-expect-error — age is number, not string
+    await condRepo.update({ userId: "u1" }, { age: { $set: "not a number" } });
+  });
+
+  test("rejects unknown field", async () => {
+    // @ts-expect-error — "nonexistent" is not a field
+    await condRepo.update({ userId: "u1" }, { nonexistent: "value" });
+  });
+
+  test("rejects condition operator in update", async () => {
+    // @ts-expect-error — $prefix is a condition operator, not an update operator
+    await condRepo.update({ userId: "u1" }, { name: { $prefix: "A" } });
+  });
+
+  test("rejects $minus on string", async () => {
+    // @ts-expect-error — $minus is only for numbers
+    await condRepo.update({ userId: "u1" }, { name: { $minus: 1 } });
+  });
+
+  test("rejects $prepend on number", async () => {
+    // @ts-expect-error — $prepend is only for arrays
+    await condRepo.update({ userId: "u1" }, { age: { $prepend: 5 } });
+  });
+});

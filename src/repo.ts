@@ -124,10 +124,10 @@ export abstract class AbstractRepo<T extends Table> {
 
   async update(
     key: RepoKey<this>,
-    update: RepoUpdateData,
+    update: RepoUpdateData<ExtractTableSchema<T>>,
     options?: RepoUpdateOptions<this>,
   ): Promise<RepoUpdateResult<this>> {
-    const updateWithDefaults = { ...this.defaultUpdateData, ...update };
+    const updateWithDefaults = { ...this.defaultUpdateData, ...update } as any;
     const result = await this.db.update({
       table: this.tableName,
       key: this.extractKey(key),
@@ -399,7 +399,7 @@ export abstract class AbstractRepo<T extends Table> {
 
   async trxUpdate(
     keys: RepoKey<this>[],
-    update: RepoUpdateData,
+    update: RepoUpdateData<ExtractTableSchema<T>>,
     options?: Omit<RepoUpdateOptions<this>, "return">,
   ): Promise<void> {
     return this.db.trxWrite(...keys.map((key) => this.trxUpdateRequest(key, update, options)));
@@ -448,10 +448,10 @@ export abstract class AbstractRepo<T extends Table> {
 
   trxUpdateRequest(
     key: RepoKey<this>,
-    update: RepoUpdateData,
+    update: RepoUpdateData<ExtractTableSchema<T>>,
     options?: Omit<RepoUpdateOptions<this>, "return">,
   ): DbTrxWriteRequest {
-    const updateWithDefaults = { ...this.defaultUpdateData, ...update };
+    const updateWithDefaults = { ...this.defaultUpdateData, ...update } as any;
     return {
       table: this.tableName,
       type: "UPDATE",

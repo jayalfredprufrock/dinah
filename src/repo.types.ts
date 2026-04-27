@@ -10,6 +10,7 @@ import type {
   Obj,
   SortKeyQuery,
   ToUnion,
+  UpdateExpression,
 } from "./types";
 
 //-----------------------------------------------------------------------------------------------------
@@ -119,7 +120,7 @@ export type RepoCreateResult<R extends AbstractRepo<any>> = RepoOutput<R>;
 
 // update ---------------------------------------------------------------------------------------------
 
-export type RepoUpdateData = Obj;
+export type RepoUpdateData<T = Obj> = UpdateExpression<T>;
 
 export interface RepoUpdateOptions<R extends AbstractRepo<any>> {
   condition?: Condition<R["$schema"]>;
@@ -303,7 +304,7 @@ export interface RepoTrxUpdateRequest<R extends AbstractRepo<any>> {
   table: string;
   type: "UPDATE";
   key: RepoKey<R>;
-  update: RepoUpdateData;
+  update: RepoUpdateData<R["$schema"]>;
   condition?: Condition<R["$schema"]>;
 }
 

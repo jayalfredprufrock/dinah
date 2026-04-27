@@ -1,4 +1,4 @@
-import type { AllKeys, Condition, KeyCondition, Obj } from "./types";
+import type { AllKeys, Condition, KeyCondition, Obj, UpdateExpression } from "./types";
 
 export interface DbConfig {
   tableNamePrefix?: string;
@@ -33,14 +33,14 @@ export interface DbCreate<T = Obj> {
 export interface DbUpdate<T = Obj> {
   table: string;
   key: Partial<T>;
-  update: Obj;
+  update: UpdateExpression<T>;
   condition?: Condition<T>;
 }
 
 export interface DbUpsert<T = Obj> {
   table: string;
   key: Partial<T>;
-  update: Obj;
+  update: UpdateExpression<T>;
   item: T;
   condition?: Condition<T>;
 }
@@ -146,7 +146,7 @@ export interface DbTrxUpdateRequest<T = Obj> {
   table: string;
   type: "UPDATE";
   key: Partial<T>;
-  update: Obj;
+  update: UpdateExpression<T>;
   condition?: Condition<T>;
 }
 

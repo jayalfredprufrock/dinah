@@ -107,7 +107,7 @@ export type ValidGsiKeys<T> = ExtractKeys<T, string | number>;
 // ── Condition typing ──────────────────────────────────────────────────────────
 
 /** Extract the type of field K across all members of union T */
-type ValueOfUnion<T, K extends string> = T extends unknown
+export type ValueOfUnion<T, K extends string> = T extends unknown
   ? K extends keyof T
     ? T[K]
     : never
@@ -151,7 +151,7 @@ interface SizeOps {
 }
 
 /** Path reference for cross-attribute comparisons */
-interface PathRef {
+export interface PathRef {
   $path: string;
 }
 
@@ -189,6 +189,36 @@ export type Condition<T> = FieldCondition<T> & {
 /** Key condition expression — only KeyConditionExpression-valid operators, no compound operators. */
 export type KeyCondition<T> = {
   [K in AllKeys<T>]?: ValueOfUnion<T, K> | SortKeyOps<ValueOfUnion<T, K>>;
+};
+
+// ── Update expression typing ─────────────────────────────────────────────────
+
+interface UpdateNumberOps {
+  $plus?: number | [number | PathRef, number | PathRef];
+  $minus?: number | [number | PathRef, number | PathRef];
+}
+
+interface UpdateListOps<E> {
+  $append?: E | E[] | PathRef;
+  $prepend?: E | E[] | PathRef;
+}
+
+interface UpdateCommonOps<V> {
+  $set?: V;
+  $remove?: true;
+  $ifNotExists?: V | [string, V];
+  $setAdd?: V | V[];
+  $setDel?: V | V[];
+}
+
+type UpdateFieldOps<V> = [NonNullable<V>] extends [number]
+  ? UpdateCommonOps<V> & UpdateNumberOps
+  : [NonNullable<V>] extends [(infer E)[]]
+    ? UpdateCommonOps<V> & UpdateListOps<E>
+    : UpdateCommonOps<V>;
+
+export type UpdateExpression<T> = {
+  [K in AllKeys<T>]?: ValueOfUnion<T, K> | UpdateFieldOps<ValueOfUnion<T, K>> | undefined;
 };
 
 //-----------------------------------------------------------------------------------------------------

@@ -171,7 +171,7 @@ export class Db {
       Key: data.key,
       ReturnValues: "ALL_NEW",
       ReturnValuesOnConditionCheckFailure: "ALL_OLD",
-      UpdateExpression: exp.update(data.update),
+      UpdateExpression: exp.update(data.update as Obj),
       ConditionExpression: exp.condition(condition),
       ExpressionAttributeNames: exp.attributeNames,
       ExpressionAttributeValues: exp.attributeValues,
@@ -609,7 +609,7 @@ export class Db {
         Update: {
           Key: request.key,
           TableName: request.table,
-          UpdateExpression: exp.update(request.update),
+          UpdateExpression: exp.update(request.update as Obj),
           ConditionExpression: exp.condition(request.condition),
           ExpressionAttributeNames: exp.attributeNames,
           ExpressionAttributeValues: exp.attributeValues,
