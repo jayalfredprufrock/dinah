@@ -650,6 +650,33 @@ describe("sort key operator typing — number sort key (GSI)", () => {
     await repo.queryGsi("allGsi", { gsiPk: "a", gsiSk: { $gte: 10 } });
   });
 
+  test("accepts $lte on number sort key", async () => {
+    await repo.queryGsi("allGsi", { gsiPk: "a", gsiSk: { $lte: 10 } });
+  });
+
+  test("accepts $lt on number sort key", async () => {
+    await repo.queryGsi("allGsi", { gsiPk: "a", gsiSk: { $lt: 10 } });
+  });
+
+  test("accepts $gt on number sort key", async () => {
+    await repo.queryGsi("allGsi", { gsiPk: "a", gsiSk: { $gt: 10 } });
+  });
+
+  test("accepts $lte on optional number sort key", async () => {
+    const OptSchema = Type.Object({
+      pk: Type.String(),
+      sk: Type.Optional(Type.Number()),
+    });
+    const OptTable = new Table(OptSchema, {
+      name: "opt",
+      partitionKey: "pk",
+      gsis: { byPk: { partitionKey: "pk", sortKey: "sk" } },
+    });
+    const optRepo = db.createRepo(OptTable);
+    await optRepo.queryGsi("byPk", { pk: "a", sk: { $lte: 10 } });
+    await optRepo.queryGsi("byPk", { pk: "a", sk: { $between: [1, 100] } });
+  });
+
   test("accepts $between on number sort key", async () => {
     await repo.queryGsi("allGsi", { gsiPk: "a", gsiSk: { $between: [1, 100] } });
   });

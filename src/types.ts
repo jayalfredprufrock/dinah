@@ -46,11 +46,11 @@ export type PickTypeOf<T, K extends AllKeys<T>, O> = T extends { [k in K]?: O } 
 export type ToUnion<T> = T extends readonly (infer U)[] ? U : T;
 
 /** Operators valid in a KeyConditionExpression (sort key). */
-export type SortKeyOps<V> = { $eq?: V; $gt?: V; $gte?: V; $lt?: V; $lte?: V } & ([V] extends [
-  string,
-]
+export type SortKeyOps<V> = { $eq?: V; $gt?: V; $gte?: V; $lt?: V; $lte?: V } & ([
+  NonNullable<V>,
+] extends [string]
   ? { $between?: [string, string]; $prefix?: string }
-  : [V] extends [number]
+  : [NonNullable<V>] extends [number]
     ? { $between?: [number, number] }
     : {});
 
