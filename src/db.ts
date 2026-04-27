@@ -33,8 +33,8 @@ import type {
   DbTrxGetResult,
   DbTrxWriteRequest,
   DbUpdate,
-  Obj,
-} from "./types";
+} from "./db.types";
+import type { Obj } from "./types";
 import { extractTableDesc, removeUndefined } from "./util";
 
 // TODO
@@ -105,7 +105,7 @@ export class Db {
     return tables;
   }
 
-  async get<R = Obj>(data: DbGet): Promise<R | undefined> {
+  async get<T = Obj>(data: DbGet<T>): Promise<T | undefined> {
     const exp = new ExpressionBuilder();
 
     const input = new Lib.GetCommand({
@@ -118,25 +118,25 @@ export class Db {
 
     const output = await this.client.send(input);
 
-    if (output.Item && data.filter && !data.filter(output.Item)) {
+    if (output.Item && data.filter && !data.filter(output.Item as T)) {
       return undefined;
     }
 
-    return output.Item as R;
+    return output.Item as T;
   }
 
-  async getOrThrow<R = Obj>(data: DbGet): Promise<R> {
-    const item = await this.get<R>(data);
+  async getOrThrow<T = Obj>(data: DbGet<T>): Promise<T> {
+    const item = await this.get<T>(data);
     if (!item) {
       throw new Error(`Item not found in "${data.table}" table.`);
     }
     return item;
   }
 
-  async put<R = Obj>(data: DbPut): Promise<R> {
+  async put<T = Obj>(data: DbPut<T>): Promise<T> {
     const exp = new ExpressionBuilder();
 
-    const item = removeUndefined(data.item);
+    const item = removeUndefined(data.item as Obj);
 
     const input = new Lib.PutCommand({
       TableName: data.table,
@@ -150,13 +150,13 @@ export class Db {
 
     const output = await this.client.send(input);
 
-    return (data.returnOld ? output.Attributes : item) as R;
+    return (data.returnOld ? output.Attributes : item) as T;
   }
 
-  async update<R = Obj>(data: DbUpdate): Promise<R> {
+  async update<T = Obj>(data: DbUpdate<T>): Promise<T> {
     const exp = new ExpressionBuilder();
 
-    const condition = {
+    const condition: any = {
       $and: Object.keys(data.key).map((field) => ({
         [field]: { $exists: true },
       })),
@@ -179,10 +179,10 @@ export class Db {
 
     const output = await this.client.send(input);
 
-    return output.Attributes as R;
+    return output.Attributes as T;
   }
 
-  async delete<R = Obj>(data: DbDelete): Promise<R | undefined> {
+  async delete<T = Obj>(data: DbDelete<T>): Promise<T | undefined> {
     const exp = new ExpressionBuilder();
 
     const input = new Lib.DeleteCommand({
@@ -197,21 +197,21 @@ export class Db {
 
     const output = await this.client.send(input);
 
-    return output.Attributes as R | undefined;
+    return output.Attributes as T | undefined;
   }
 
-  async deleteOrThrow<R = Obj>(data: DbDelete): Promise<R> {
-    const item = await this.delete<R>(data);
+  async deleteOrThrow<T = Obj>(data: DbDelete<T>): Promise<T> {
+    const item = await this.delete<T>(data);
     if (!item) {
       throw new Error(`Item not found in "${data.table}" table.`);
     }
     return item;
   }
 
-  async *queryPaged<R = Obj>(data: DbQuery): AsyncGenerator<R[]> {
+  async *queryPaged<T = Obj>(data: DbQuery<T>): AsyncGenerator<T[]> {
     const exp = new ExpressionBuilder();
 
-    let lastEvaluatedKey = data.startKey;
+    let lastEvaluatedKey: Obj | undefined = data.startKey as Obj | undefined;
     do {
       const input = new Lib.QueryCommand({
         TableName: data.table,
@@ -230,23 +230,23 @@ export class Db {
       const output = await this.client.send(input);
 
       if (output.Items?.length) {
-        yield output.Items as R[];
+        yield output.Items as T[];
       }
       lastEvaluatedKey = output.LastEvaluatedKey;
     } while (lastEvaluatedKey);
   }
 
-  async query<R = Obj>(data: DbQuery): Promise<R[]> {
-    const items: Obj[] = [];
+  async query<T = Obj>(data: DbQuery<T>): Promise<T[]> {
+    const items: T[] = [];
 
     for await (const page of this.queryPaged(data)) {
       items.push(...page);
     }
 
-    return items as R[];
+    return items;
   }
 
-  async *scanPaged<R = Obj>(data: DbScan): AsyncGenerator<R[]> {
+  async *scanPaged<T = Obj>(data: DbScan<T>): AsyncGenerator<T[]> {
     const exp = new ExpressionBuilder();
 
     const totalSegments = data.parallel ?? 1;
@@ -254,7 +254,9 @@ export class Db {
 
     // undefined: initial value when a start key isn't specified
     // null: scanning a particular segment is finished
-    const lastEvaluatedKeys: (Obj | undefined | null)[] = segments.map(() => data.startKey);
+    const lastEvaluatedKeys: (Obj | undefined | null)[] = segments.map(
+      () => data.startKey as Obj | undefined,
+    );
     do {
       const results = await Promise.all(
         segments.map(async (segment) => {
@@ -283,22 +285,22 @@ export class Db {
       const items = results.flat();
 
       if (items.length) {
-        yield items as R[];
+        yield items as T[];
       }
     } while (lastEvaluatedKeys.some((key) => key !== null));
   }
 
-  async scan<R = Obj>(data: DbScan): Promise<R[]> {
-    const items: R[] = [];
+  async scan<T = Obj>(data: DbScan<T>): Promise<T[]> {
+    const items: T[] = [];
 
     for await (const page of this.scanPaged(data)) {
-      items.push(...(page as R[]));
+      items.push(...(page as T[]));
     }
 
     return items;
   }
 
-  async exists(data: DbExists): Promise<boolean> {
+  async exists<T = Obj>(data: DbExists<T>): Promise<boolean> {
     const { query, ...otherOptions } = data;
 
     // we can't rely on the limit when a filter is being applied, since the filter is

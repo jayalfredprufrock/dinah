@@ -1,7 +1,8 @@
 import { Type } from "typebox";
 import { describe, expectTypeOf, test } from "vite-plus/test";
 import { AbstractRepo, Db, Table } from "../src";
-import type { Condition, RepoGsiStartKey, RepoQueryGsiQuery } from "../src/types";
+import type { Condition } from "../src/types";
+import type { RepoGsiStartKey, RepoQueryGsiQuery } from "../src/repo.types";
 
 const Schema = Type.Object({
   pk: Type.String(),

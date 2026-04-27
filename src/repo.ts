@@ -1,13 +1,7 @@
 import type { Db } from "./db";
 import type { Table } from "./table";
+import type { DbTrxGetRequest, DbTrxWriteRequest } from "./db.types";
 import type {
-  Condition,
-  DbTrxGetRequest,
-  DbTrxWriteRequest,
-  ExtractTableDef,
-  ExtractTableSchema,
-  TableGsiNames,
-  Obj,
   RepoBatchGetOptions,
   RepoBatchGetOrThrowResult,
   RepoBatchGetResult,
@@ -48,7 +42,9 @@ import type {
   RepoUpdateResult,
   RepoQueryGsiQuery,
   RepoQueryQuery,
-} from "./types";
+  TableGsiNames,
+} from "./repo.types";
+import type { Condition, ExtractTableDef, ExtractTableSchema, Obj } from "./types";
 
 // TODO: query/queryGsi needs strongly typed "key" argument
 // allows =,>,>=,<,<=,begins_with, between on sort key
@@ -104,7 +100,7 @@ export abstract class AbstractRepo<T extends Table> {
       table: this.tableName,
       key: this.extractKey(key),
       ...options,
-    });
+    } as any);
     return item && this.applyTransformIfNeeded(item, options);
   }
 
@@ -116,7 +112,7 @@ export abstract class AbstractRepo<T extends Table> {
       table: this.tableName,
       key: this.extractKey(key),
       ...options,
-    });
+    } as any);
     return this.applyTransformIfNeeded(item, options);
   }
 
@@ -184,7 +180,7 @@ export abstract class AbstractRepo<T extends Table> {
     query: RepoQueryQuery<this>,
     options?: O,
   ): Promise<RepoQueryResult<this, O>> {
-    const items = await this.db.query({ table: this.tableName, query, ...options });
+    const items = await this.db.query({ table: this.tableName, query, ...options } as any);
     return this.applyTransformsIfNeeded(items, options);
   }
 
@@ -192,7 +188,11 @@ export abstract class AbstractRepo<T extends Table> {
     query: RepoQueryQuery<this>,
     options?: O,
   ): RepoQueryPagedResult<this, O> {
-    for await (const page of this.db.queryPaged({ table: this.tableName, query, ...options })) {
+    for await (const page of this.db.queryPaged({
+      table: this.tableName,
+      query,
+      ...options,
+    } as any)) {
       yield this.applyTransformsIfNeeded(page, options);
     }
   }
@@ -202,7 +202,12 @@ export abstract class AbstractRepo<T extends Table> {
     query: RepoQueryGsiQuery<T, G>,
     options?: O,
   ): Promise<RepoQueryGsiResult<this, O, G>> {
-    const items = await this.db.query({ table: this.tableName, index: gsi, query, ...options });
+    const items = await this.db.query({
+      table: this.tableName,
+      index: gsi,
+      query,
+      ...options,
+    } as any);
     return this.applyTransformsIfNeeded(items, { ...options, gsi });
   }
 
@@ -216,7 +221,7 @@ export abstract class AbstractRepo<T extends Table> {
       index: gsi,
       query,
       ...options,
-    })) {
+    } as any)) {
       yield this.applyTransformsIfNeeded(page, { ...options, gsi });
     }
   }
@@ -236,7 +241,7 @@ export abstract class AbstractRepo<T extends Table> {
     gsi: G,
     options?: O,
   ): Promise<RepoScanGsiResult<this, O, G>> {
-    const items = await this.db.scan({ table: this.tableName, index: gsi, ...options });
+    const items = await this.db.scan({ table: this.tableName, index: gsi, ...options } as any);
     return this.applyTransformsIfNeeded(items, { ...options, gsi });
   }
 
@@ -248,7 +253,7 @@ export abstract class AbstractRepo<T extends Table> {
       table: this.tableName,
       index: gsi,
       ...options,
-    })) {
+    } as any)) {
       yield this.applyTransformsIfNeeded(page, { ...options, gsi });
     }
   }
@@ -256,7 +261,7 @@ export abstract class AbstractRepo<T extends Table> {
   async exists(options?: RepoExistsOptions<this>): Promise<boolean> {
     return this.db.exists({
       table: this.tableName,
-      projection: [this.table.def.partitionKey],
+      projection: [this.table.def.partitionKey] as any,
       ...options,
     });
   }
@@ -265,7 +270,7 @@ export abstract class AbstractRepo<T extends Table> {
     return this.db.exists({
       table: this.tableName,
       index: gsi,
-      projection: [this.table.def.partitionKey],
+      projection: [this.table.def.partitionKey] as any,
       ...options,
     });
   }
@@ -276,7 +281,7 @@ export abstract class AbstractRepo<T extends Table> {
   ): Promise<RepoBatchGetResult<this, O>> {
     const { items, unprocessed } = await this.db.batchGet({
       [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...options },
-    });
+    } as any);
     const tableItems = items[this.tableName];
     return {
       items: tableItems && this.applyTransformsIfNeeded(tableItems, options),
@@ -290,7 +295,7 @@ export abstract class AbstractRepo<T extends Table> {
   ): Promise<RepoBatchGetOrThrowResult<this, O>> {
     const result = await this.db.batchGetOrThrow({
       [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...options },
-    });
+    } as any);
     return this.applyTransformsIfNeeded(result[this.tableName] ?? [], options);
   }
 
@@ -317,11 +322,14 @@ export abstract class AbstractRepo<T extends Table> {
     options?: O,
   ): Promise<RepoTrxGetResult<this, O>> {
     const items = await this.db.trxGet(
-      ...keys.map((key) => ({
-        table: this.tableName,
-        key: this.extractKey(key),
-        ...options,
-      })),
+      ...keys.map(
+        (key) =>
+          ({
+            table: this.tableName,
+            key: this.extractKey(key),
+            ...options,
+          }) as any,
+      ),
     );
     return items.map((item: any) => item && this.applyTransformIfNeeded(item, options)) as any;
   }
@@ -331,11 +339,14 @@ export abstract class AbstractRepo<T extends Table> {
     options?: O,
   ): Promise<RepoTrxGetOrThrowResult<this, O>> {
     const items = await this.db.trxGetOrThrow(
-      ...keys.map((key) => ({
-        table: this.tableName,
-        key: this.extractKey(key),
-        ...options,
-      })),
+      ...keys.map(
+        (key) =>
+          ({
+            table: this.tableName,
+            key: this.extractKey(key),
+            ...options,
+          }) as any,
+      ),
     );
     return this.applyTransformsIfNeeded(items, options);
   }
@@ -403,7 +414,7 @@ export abstract class AbstractRepo<T extends Table> {
     key: RepoKey<this>,
     options?: O,
   ): DbTrxGetRequest<RepoGetOrThrowResult<this, O>> {
-    return { table: this.tableName, key: this.extractKey(key), ...options };
+    return { table: this.tableName, key: this.extractKey(key), ...options } as any;
   }
 
   trxDeleteRequest(
