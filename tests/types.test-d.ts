@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { describe, expectTypeOf, test } from "vite-plus/test";
 import { AbstractRepo, Db, Table } from "../src";
-import type { Condition } from "../src/types";
+import type { Condition, SortKeyOps } from "../src/types";
 import type { RepoGsiStartKey, RepoQueryGsiQuery } from "../src/repo.types";
 
 const Schema = Type.Object({
@@ -113,7 +113,7 @@ describe("queryGsi return types", () => {
 describe("queryGsi query argument types", () => {
   test("GSI with sort key requires partition key, allows optional sort key", () => {
     expectTypeOf<RepoQueryGsiQuery<typeof TestTable, "allGsi">>().toEqualTypeOf<
-      { gsiPk: string } & Partial<{ gsiSk: number }>
+      { gsiPk: string } & { gsiSk?: number | SortKeyOps<number> }
     >();
   });
 
@@ -409,7 +409,7 @@ describe("multi-key GSI query argument types", () => {
 
   test("multi PK + single SK GSI allows optional SK", () => {
     expectTypeOf<RepoQueryGsiQuery<typeof MultiKeyTable, "multiPkSingleSk">>().toEqualTypeOf<
-      { tenantId: string; region: string } & Partial<{ round: string }>
+      { tenantId: string; region: string } & { round?: string | SortKeyOps<string> }
     >();
   });
 
@@ -581,6 +581,165 @@ describe("transformItem return type narrowing", () => {
       data: "d",
     });
     expectTypeOf(result).toEqualTypeOf<Transformed>();
+  });
+});
+
+// ── Sort key operator typing ─────────────────────────────────────────────────
+
+describe("sort key operator typing — string sort key", () => {
+  test("accepts direct value (backward compat)", async () => {
+    await repo.query({ pk: "a", sk: "b" });
+  });
+
+  test("accepts $eq operator", async () => {
+    await repo.query({ pk: "a", sk: { $eq: "b" } });
+  });
+
+  test("accepts $gt operator", async () => {
+    await repo.query({ pk: "a", sk: { $gt: "b" } });
+  });
+
+  test("accepts $gte operator", async () => {
+    await repo.query({ pk: "a", sk: { $gte: "b" } });
+  });
+
+  test("accepts $lt operator", async () => {
+    await repo.query({ pk: "a", sk: { $lt: "b" } });
+  });
+
+  test("accepts $lte operator", async () => {
+    await repo.query({ pk: "a", sk: { $lte: "b" } });
+  });
+
+  test("accepts $between on string sort key", async () => {
+    await repo.query({ pk: "a", sk: { $between: ["a", "z"] } });
+  });
+
+  test("accepts $prefix on string sort key", async () => {
+    await repo.query({ pk: "a", sk: { $prefix: "pre" } });
+  });
+
+  test("rejects $ne on sort key", () => {
+    // @ts-expect-error — $ne is not valid in KeyConditionExpression
+    void repo.query({ pk: "a", sk: { $ne: "b" } });
+  });
+
+  test("rejects $in on sort key", () => {
+    // @ts-expect-error — $in is not valid in KeyConditionExpression
+    void repo.query({ pk: "a", sk: { $in: ["a", "b"] } });
+  });
+
+  test("rejects $exists on sort key", () => {
+    // @ts-expect-error — $exists is not valid in KeyConditionExpression
+    void repo.query({ pk: "a", sk: { $exists: true } });
+  });
+
+  test("rejects operators on partition key", () => {
+    // @ts-expect-error — partition key only accepts direct value
+    void repo.query({ pk: { $gt: "a" }, sk: "b" });
+  });
+
+  test("rejects wrong value type in operator", () => {
+    // @ts-expect-error — sk is string, $gt expects string not number
+    void repo.query({ pk: "a", sk: { $gt: 123 } });
+  });
+});
+
+describe("sort key operator typing — number sort key (GSI)", () => {
+  test("accepts $gte on number sort key", async () => {
+    await repo.queryGsi("allGsi", { gsiPk: "a", gsiSk: { $gte: 10 } });
+  });
+
+  test("accepts $between on number sort key", async () => {
+    await repo.queryGsi("allGsi", { gsiPk: "a", gsiSk: { $between: [1, 100] } });
+  });
+
+  test("rejects $prefix on number sort key", () => {
+    // @ts-expect-error — $prefix is only for strings
+    void repo.queryGsi("allGsi", { gsiPk: "a", gsiSk: { $prefix: "1" } });
+  });
+
+  test("rejects $between with string tuple on number sort key", () => {
+    // @ts-expect-error — $between on number needs [number, number]
+    void repo.queryGsi("allGsi", { gsiPk: "a", gsiSk: { $between: ["a", "z"] } });
+  });
+});
+
+describe("sort key operator typing — multi-key sort key", () => {
+  test("accepts operators on provided fields", async () => {
+    await mkRepo.queryGsi("byTenantRegion", {
+      tenantId: "t1",
+      region: "us",
+      round: { $prefix: "SEMI" },
+    });
+  });
+
+  test("accepts operators on multiple SK fields", async () => {
+    await mkRepo.queryGsi("byTenantRegion", {
+      tenantId: "t1",
+      region: "us",
+      round: { $gte: "A" },
+      bracket: { $prefix: "UP" },
+    });
+  });
+
+  test("rejects invalid operators on multi-key fields", () => {
+    void mkRepo.queryGsi("byTenantRegion", {
+      tenantId: "t1",
+      region: "us",
+      // @ts-expect-error — $ne not valid on sort key
+      round: { $ne: "FINAL" },
+    });
+  });
+});
+
+describe("KeyCondition typing — Db.query", () => {
+  type DbItem = { id: string; sk: string; status: string; age: number };
+
+  test("accepts field-level key operators", async () => {
+    await db.query<DbItem>({ table: "t", query: { id: "a", sk: { $gte: "b" } } });
+  });
+
+  test("accepts $between", async () => {
+    await db.query<DbItem>({ table: "t", query: { id: "a", sk: { $between: ["a", "z"] } } });
+  });
+
+  test("rejects $and at top level", () => {
+    // @ts-expect-error — compound operators not valid in KeyConditionExpression
+    void db.query<DbItem>({ table: "t", query: { $and: [{ id: "a" }] } });
+  });
+
+  test("rejects $or at top level", () => {
+    // @ts-expect-error — compound operators not valid in KeyConditionExpression
+    void db.query<DbItem>({ table: "t", query: { $or: [{ id: "a" }] } });
+  });
+
+  test("rejects $not at top level", () => {
+    // @ts-expect-error — compound operators not valid in KeyConditionExpression
+    void db.query<DbItem>({ table: "t", query: { $not: { id: "a" } } });
+  });
+
+  test("rejects $ne on fields", () => {
+    // @ts-expect-error — $ne not valid in KeyConditionExpression
+    void db.query<DbItem>({ table: "t", query: { id: { $ne: "a" } } });
+  });
+
+  test("rejects $in on fields", () => {
+    // @ts-expect-error — $in not valid in KeyConditionExpression
+    void db.query<DbItem>({ table: "t", query: { id: { $in: ["a"] } } });
+  });
+
+  test("rejects $exists on fields", () => {
+    // @ts-expect-error — $exists not valid in KeyConditionExpression
+    void db.query<DbItem>({ table: "t", query: { id: { $exists: true } } });
+  });
+
+  test("filter still allows full condition operators", async () => {
+    await db.query<DbItem>({
+      table: "t",
+      query: { id: "a" },
+      filter: { status: { $ne: "deleted" }, $or: [{ age: { $gt: 18 } }] },
+    });
   });
 });
 

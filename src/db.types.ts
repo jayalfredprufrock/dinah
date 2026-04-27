@@ -1,4 +1,4 @@
-import type { AllKeys, Condition, Obj } from "./types";
+import type { AllKeys, Condition, KeyCondition, Obj } from "./types";
 
 export interface DbConfig {
   tableNamePrefix?: string;
@@ -53,7 +53,7 @@ export interface DbDelete<T = Obj> {
 
 export interface DbQuery<T = Obj> {
   table: string;
-  query: Condition<T>;
+  query: KeyCondition<T>;
   startKey?: Partial<T>;
   filter?: Condition<T>;
   projection?: AllKeys<T>[];
@@ -76,7 +76,7 @@ export interface DbScan<T = Obj> {
 
 export interface DbExists<T = Obj> {
   table: string;
-  query?: Condition<T>;
+  query?: KeyCondition<T>;
   filter?: Condition<T>;
   index?: string;
   projection?: AllKeys<T>[];

@@ -45,6 +45,21 @@ export type PickTypeOf<T, K extends AllKeys<T>, O> = T extends { [k in K]?: O } 
 // Normalize string | readonly string[] to a union of strings
 export type ToUnion<T> = T extends readonly (infer U)[] ? U : T;
 
+/** Operators valid in a KeyConditionExpression (sort key). */
+export type SortKeyOps<V> = { $eq?: V; $gt?: V; $gte?: V; $lt?: V; $lte?: V } & ([V] extends [
+  string,
+]
+  ? { $between?: [string, string]; $prefix?: string }
+  : [V] extends [number]
+    ? { $between?: [number, number] }
+    : {});
+
+type SortKeyFieldCondition<V> = V | SortKeyOps<V>;
+
+type SortKeyPick<Schema, Keys extends keyof Schema> = {
+  [K in Keys]: SortKeyFieldCondition<Schema[K]>;
+};
+
 // Enumerate valid left-to-right sort key combinations for multi-key GSIs (max 4 attributes)
 export type SortKeyQuery<Schema, SK> = SK extends readonly [
   infer A extends string & keyof Schema,
@@ -54,25 +69,25 @@ export type SortKeyQuery<Schema, SK> = SK extends readonly [
 ]
   ?
       | {}
-      | Pick<Schema, A>
-      | Pick<Schema, A | B>
-      | Pick<Schema, A | B | C>
-      | Pick<Schema, A | B | C | D>
+      | SortKeyPick<Schema, A>
+      | SortKeyPick<Schema, A | B>
+      | SortKeyPick<Schema, A | B | C>
+      | SortKeyPick<Schema, A | B | C | D>
   : SK extends readonly [
         infer A extends string & keyof Schema,
         infer B extends string & keyof Schema,
         infer C extends string & keyof Schema,
       ]
-    ? {} | Pick<Schema, A> | Pick<Schema, A | B> | Pick<Schema, A | B | C>
+    ? {} | SortKeyPick<Schema, A> | SortKeyPick<Schema, A | B> | SortKeyPick<Schema, A | B | C>
     : SK extends readonly [
           infer A extends string & keyof Schema,
           infer B extends string & keyof Schema,
         ]
-      ? {} | Pick<Schema, A> | Pick<Schema, A | B>
+      ? {} | SortKeyPick<Schema, A> | SortKeyPick<Schema, A | B>
       : SK extends readonly [infer A extends string & keyof Schema]
-        ? {} | Pick<Schema, A>
+        ? {} | SortKeyPick<Schema, A>
         : SK extends string & keyof Schema
-          ? Partial<Pick<Schema, SK>>
+          ? { [K in SK]?: SortKeyFieldCondition<Schema[K]> }
           : {};
 
 // primary keys must exist across all union objects,
@@ -169,6 +184,11 @@ export type Condition<T> = FieldCondition<T> & {
   $and?: Condition<T>[];
   $or?: Condition<T>[];
   $not?: Condition<T>;
+};
+
+/** Key condition expression — only KeyConditionExpression-valid operators, no compound operators. */
+export type KeyCondition<T> = {
+  [K in AllKeys<T>]?: ValueOfUnion<T, K> | SortKeyOps<ValueOfUnion<T, K>>;
 };
 
 //-----------------------------------------------------------------------------------------------------
