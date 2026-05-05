@@ -523,9 +523,12 @@ export class Repo<T extends Table> {
   }
 }
 
-export const makeRepo = <T extends Table>(
-  table: T,
-): (new (db: Db) => Repo<T>) & { readonly table: T } => {
+export interface MakeRepoResult<T extends Table> {
+  new (db: Db): Repo<T>;
+  readonly table: T;
+}
+
+export const makeRepo = <T extends Table>(table: T): MakeRepoResult<T> => {
   return class extends Repo<T> {
     static readonly table = table;
     constructor(db: Db) {
