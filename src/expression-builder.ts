@@ -278,4 +278,48 @@ export class ExpressionBuilder {
 
     return this.getValueOrPathSub(operand);
   }
+
+  // ── PartiQL update (for BatchExecuteStatement) ───────────────────────────────
+
+  partiqlUpdate(expression: Obj): { sets: string[]; removes: string[]; params: unknown[] } {
+    const sets: string[] = [];
+    const removes: string[] = [];
+    const params: unknown[] = [];
+
+    for (const [path, valOrOp] of Object.entries(expression)) {
+      if (valOrOp === undefined) {
+        removes.push(`"${path}"`);
+      } else if (isOperation(valOrOp)) {
+        if (valOrOp.$remove === true) {
+          removes.push(`"${path}"`);
+        } else {
+          sets.push(`"${path}"=${this.resolvePartiQLSetOperand(path, valOrOp, params)}`);
+        }
+      } else {
+        sets.push(`"${path}"=?`);
+        params.push(valOrOp);
+      }
+    }
+
+    return { sets, removes, params };
+  }
+
+  protected resolvePartiQLSetOperand(path: string, operand: unknown, params: unknown[]): string {
+    if (isOperation(operand)) {
+      if (operand.$set !== undefined) {
+        return this.resolvePartiQLSetOperand(path, operand.$set, params);
+      }
+      if (operand.$plus !== undefined || operand.$minus !== undefined) {
+        const op = operand.$plus ? "+" : "-";
+        const mathOperand = operand.$plus ?? operand.$minus;
+        const parts = Array.isArray(mathOperand) ? mathOperand : [{ $path: path }, mathOperand];
+        return parts.map((p: any) => this.resolvePartiQLSetOperand(path, p, params)).join(op);
+      }
+      if (operand.$path) {
+        return `"${operand.$path}"`;
+      }
+    }
+    params.push(operand);
+    return "?";
+  }
 }

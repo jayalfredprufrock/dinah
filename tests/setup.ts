@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { Db, Table, AbstractRepo } from "../src";
+import { Db, Table, makeRepo } from "../src";
 
 const DYNAMODB_ENDPOINT = process.env.DYNAMODB_ENDPOINT ?? "http://localhost:8000";
 
@@ -60,9 +60,7 @@ export const AuditTable = new Table(AuditSchema, {
   billingMode: "PAY_PER_REQUEST",
 });
 
-export class AuditRepo extends AbstractRepo<typeof AuditTable> {
-  readonly table = AuditTable;
-
+export class AuditRepo extends makeRepo(AuditTable) {
   override get defaultPutData() {
     return { createdAt: 1000, updatedAt: 1000 };
   }

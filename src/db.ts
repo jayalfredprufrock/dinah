@@ -18,6 +18,8 @@ import type { Table } from "./table";
 import type {
   DbBatchGet,
   DbBatchGetResponse,
+  DbBatchUpdate,
+  DbBatchUpdateResponse,
   DbBatchWrite,
   DbBatchWriteResponse,
   DbConfig,
@@ -535,6 +537,72 @@ export class Db {
     }
 
     return result;
+  }
+
+  async batchUpdate(data: DbBatchUpdate): Promise<DbBatchUpdateResponse> {
+    const queue = Object.entries(data).flatMap(([table, req]) =>
+      req.keys.map((key) => [table, key, req.update] as [string, Obj, Obj]),
+    );
+
+    let batchSize = 25;
+    let retryCount = 0;
+
+    while (queue.length && retryCount < 5) {
+      const batch = queue.splice(0, batchSize || 1);
+
+      const statements = batch.map(([table, key, update]) => {
+        const exp = new ExpressionBuilder();
+        const { sets, removes, params } = exp.partiqlUpdate(update);
+
+        const whereParts: string[] = [];
+        for (const [field, value] of Object.entries(key)) {
+          whereParts.push(`"${field}"=?`);
+          params.push(value);
+        }
+
+        const clauses = [...sets.map((s) => `SET ${s}`), ...removes.map((r) => `REMOVE ${r}`)].join(
+          " ",
+        );
+
+        return {
+          Statement: `UPDATE "${table}" ${clauses} WHERE ${whereParts.join(" AND ")}`,
+          Parameters: params,
+        };
+      });
+
+      const output = await this.client.send(
+        new Lib.BatchExecuteStatementCommand({ Statements: statements }),
+      );
+
+      let failCount = 0;
+      output.Responses?.forEach((response, i) => {
+        if (response.Error && batch[i]) {
+          queue.push(batch[i]);
+          failCount++;
+        }
+      });
+
+      if (!failCount) {
+        retryCount = 0;
+        continue;
+      }
+
+      batchSize -= Math.floor(failCount / 2);
+      retryCount++;
+    }
+
+    if (queue.length) {
+      const unprocessed: DbBatchUpdate = {};
+      for (const [table, key, update] of queue) {
+        if (!unprocessed[table]) {
+          unprocessed[table] = { keys: [], update };
+        }
+        unprocessed[table].keys.push(key);
+      }
+      return { unprocessed };
+    }
+
+    return {};
   }
 
   async trxGet<R extends DbTrxGetRequest[]>(...requests: R): Promise<DbTrxGetResult<R>> {

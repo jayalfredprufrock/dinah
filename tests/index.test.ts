@@ -497,6 +497,56 @@ describe("batchWrite", () => {
   });
 });
 
+describe("batchUpdate", () => {
+  test("updates multiple items with direct values", async () => {
+    await userRepo.batchWrite([
+      {
+        type: "PUT",
+        item: { userId: "bu1", email: "bu1@x.com", name: "BU1", role: "user", createdAt: 1 },
+      },
+      {
+        type: "PUT",
+        item: { userId: "bu2", email: "bu2@x.com", name: "BU2", role: "user", createdAt: 2 },
+      },
+    ]);
+
+    await userRepo.batchUpdate([{ userId: "bu1" }, { userId: "bu2" }], { role: "admin" });
+
+    const { items } = await userRepo.batchGet([{ userId: "bu1" }, { userId: "bu2" }]);
+    expect(items.every((item) => item.role === "admin")).toBe(true);
+  });
+
+  test("updates with $plus increments values", async () => {
+    await userRepo.update({ userId: "bu1" }, { createdAt: 10 });
+    await userRepo.batchUpdate([{ userId: "bu1" }, { userId: "bu2" }], {
+      createdAt: { $plus: 5 },
+    });
+
+    const r1 = await userRepo.get({ userId: "bu1" });
+    const r2 = await userRepo.get({ userId: "bu2" });
+    expect(r1!.createdAt).toBe(15);
+    expect(r2!.createdAt).toBe(7);
+  });
+
+  test("updates with $minus decrements values", async () => {
+    await userRepo.batchUpdate([{ userId: "bu1" }], { createdAt: { $minus: 5 } });
+    const result = await userRepo.get({ userId: "bu1" });
+    expect(result!.createdAt).toBe(10);
+  });
+
+  test("updates with $remove removes attributes", async () => {
+    await userRepo.update({ userId: "bu1" }, { age: 30 });
+    await userRepo.batchUpdate([{ userId: "bu1" }], { age: { $remove: true } });
+    const result = await userRepo.get({ userId: "bu1" });
+    expect(result!.age).toBeUndefined();
+  });
+
+  test("returns empty unprocessed on success", async () => {
+    const result = await userRepo.batchUpdate([{ userId: "bu1" }], { name: "Updated" });
+    expect(result.unprocessed).toBeUndefined();
+  });
+});
+
 // ─── TRANSACTIONS ──────────────────────────────────────────────────────────────
 
 describe("transactions", () => {

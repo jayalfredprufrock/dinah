@@ -5,6 +5,7 @@ import type {
   RepoBatchGetOptions,
   RepoBatchGetOrThrowResult,
   RepoBatchGetResult,
+  RepoBatchUpdateResult,
   RepoBatchWrite,
   RepoBatchWriteResult,
   RepoCreateOptions,
@@ -50,16 +51,17 @@ import type { Condition, ExtractTableDef, ExtractTableSchema, Obj } from "./type
 // allows =,>,>=,<,<=,begins_with, between on sort key
 // util -> extractExclusiveStartKey(item)
 
-export abstract class AbstractRepo<T extends Table> {
+export class Repo<T extends Table> {
   // these phantom properties are used to pre-compute types derived from T
-  // which allows easy lookups using the "this" AbstractRepo type
+  // which allows easy lookups using the "this" Repo type
   declare readonly $schema: ExtractTableSchema<T>;
   declare readonly $def: ExtractTableDef<T>;
 
-  abstract readonly table: T;
+  readonly table: T;
   readonly db: Db;
-  constructor(db: Db) {
+  constructor(db: Db, table: T) {
     this.db = db;
+    this.table = table;
   }
 
   get tableName(): string {
@@ -317,6 +319,22 @@ export abstract class AbstractRepo<T extends Table> {
     } as RepoBatchWriteResult<this>;
   }
 
+  async batchUpdate(
+    keys: RepoKey<this>[],
+    update: RepoUpdateData<ExtractTableSchema<T>>,
+  ): Promise<RepoBatchUpdateResult<this>> {
+    const updateWithDefaults = { ...this.defaultUpdateData, ...update } as any;
+    const result = await this.db.batchUpdate({
+      [this.tableName]: {
+        keys: keys.map((key) => this.extractKey(key)),
+        update: updateWithDefaults,
+      },
+    } as any);
+    return {
+      unprocessed: result.unprocessed?.[this.tableName]?.keys as RepoKey<this>[] | undefined,
+    };
+  }
+
   async trxGet<O extends RepoTrxGetOptions<this>>(
     keys: RepoKey<this>[],
     options?: O,
@@ -484,7 +502,7 @@ export abstract class AbstractRepo<T extends Table> {
     };
   }
 
-  private applyTransformsIfNeeded(
+  protected applyTransformsIfNeeded(
     items: Obj[],
     options?: { projection?: any[]; gsi?: string },
   ): any[] {
@@ -499,17 +517,19 @@ export abstract class AbstractRepo<T extends Table> {
     return items.map((item) => this.transformItem(item as ExtractTableSchema<T>));
   }
 
-  private applyTransformIfNeeded(item: Obj, options?: { projection?: any[]; gsi?: string }): any {
+  protected applyTransformIfNeeded(item: Obj, options?: { projection?: any[]; gsi?: string }): any {
     const [transformedItem] = this.applyTransformsIfNeeded([item], options);
     return transformedItem;
   }
 }
 
-export class Repo<T extends Table<any, any>> extends AbstractRepo<T> {
-  readonly table: T;
-
-  constructor(db: Db, table: T) {
-    super(db);
-    this.table = table;
-  }
-}
+export const makeRepo = <T extends Table>(
+  table: T,
+): (new (db: Db) => Repo<T>) & { readonly table: T } => {
+  return class extends Repo<T> {
+    static readonly table = table;
+    constructor(db: Db) {
+      super(db, table);
+    }
+  };
+};

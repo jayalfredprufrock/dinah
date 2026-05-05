@@ -114,6 +114,19 @@ export interface DbBatchWriteResponse {
   unprocessed?: DbBatchWrite;
 }
 
+// batch update ------------------------------------------------------------------------------------
+
+export interface DbBatchUpdateRequest<T = Obj> {
+  keys: Partial<T>[];
+  update: UpdateExpression<T>;
+}
+
+export type DbBatchUpdate = Obj<DbBatchUpdateRequest>;
+
+export interface DbBatchUpdateResponse {
+  unprocessed?: DbBatchUpdate;
+}
+
 export interface DbTrxGetRequest<T = Obj> {
   table: string;
   key: Partial<T>;

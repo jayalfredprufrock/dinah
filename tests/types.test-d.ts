@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { describe, expectTypeOf, test } from "vite-plus/test";
-import { AbstractRepo, Db, Table } from "../src";
+import { Repo, Db, Table } from "../src";
 import type { Condition, SortKeyOps } from "../src/types";
 import type { RepoGsiStartKey, RepoQueryGsiQuery } from "../src/repo.types";
 
@@ -213,8 +213,10 @@ async function reproCat() {
 }
 void reproCat;
 
-class CatRepo extends AbstractRepo<typeof catTable> {
-  readonly table = catTable;
+class CatRepo extends Repo<typeof catTable> {
+  constructor(db: Db) {
+    super(db, catTable);
+  }
   async findByBreed() {
     return this.queryGsi("byBreed", { breed: "calico" });
   }
@@ -535,8 +537,10 @@ describe("write return types", () => {
 
 type Transformed = Item & { computed: number };
 
-class TransformRepo extends AbstractRepo<typeof TestTable> {
-  readonly table = TestTable;
+class TransformRepo extends Repo<typeof TestTable> {
+  constructor(db: Db) {
+    super(db, TestTable);
+  }
   override transformItem(item: Item): Transformed {
     return { ...item, computed: 42 };
   }
