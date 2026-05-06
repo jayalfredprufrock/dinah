@@ -3,12 +3,11 @@ import type {
   CreateTableCommandInput,
   ProjectionType,
 } from "@aws-sdk/client-dynamodb";
-import { type TSchema, type TEnumValue } from "typebox";
-import * as T from "typebox/type";
+import * as T from "typebox";
 import type { Obj } from "./types";
 import type { Table } from "./table";
 
-export const resolveAttrType = (schema: TSchema | TEnumValue, attrName: string): "S" | "N" => {
+export const resolveAttrType = (schema: T.TSchema | T.TEnumValue, attrName: string): "S" | "N" => {
   if (T.IsString(schema) || T.IsLiteralString(schema) || typeof schema === "string") {
     return "S";
   }
