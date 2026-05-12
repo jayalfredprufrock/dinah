@@ -99,16 +99,29 @@ const UserTable = new Table(
 
 ### Using the Repository Class
 
-`Repository` is the recommended way to interact with DynamoDB. Created from a `Table`, it provides full type inference for keys, items, queries, and projections:
+`Repo` is the recommended way to interact with DynamoDB. For a plain repo with no configuration, use `db.createRepo`:
 
 ```typescript
 const userRepo = db.createRepo(UserTable);
 ```
 
+For repos with defaults, transforms, or attribute rules, use `makeRepo` to define a class (see [Repository Configuration](#repository-configuration)):
+
+```typescript
+import { makeRepo } from "dinah";
+
+class UserRepo extends makeRepo(UserTable, {
+  defaultPutData: () => ({ createdAt: Date.now() }),
+  defaultUpdateData: () => ({ updatedAt: Date.now() }),
+}) {}
+
+const userRepo = new UserRepo(db);
+```
+
 #### CRUD
 
 ```typescript
-// Create (conditional put - fails if item already exists)
+// Create (conditional put — fails if item already exists)
 const user = await userRepo.create({
   userId: "u1",
   email: "alice@example.com",
@@ -126,14 +139,47 @@ const partial = await userRepo.get({ userId: "u1" }, { projection: ["name", "ema
 // getOrThrow (throws if item not found)
 const aliceOrThrow = await userRepo.getOrThrow({ userId: "u1" });
 
-// Update
+// Put (upsert)
+await userRepo.put({
+  userId: "u1",
+  email: "alice@example.com",
+  name: "Alice",
+  role: "admin",
+  createdAt: Date.now(),
+});
+
+// Update (throws if item does not exist)
 const updated = await userRepo.update(
   { userId: "u1" },
   { name: "Alice Smith", updatedAt: Date.now() },
 );
 
-// Delete
-await userRepo.delete({ userId: "u1" });
+// Delete (returns old item or undefined)
+const deleted = await userRepo.delete({ userId: "u1" });
+
+// deleteOrThrow (throws if item not found)
+const item = await userRepo.deleteOrThrow({ userId: "u1" });
+```
+
+#### Update Expressions
+
+The update argument supports MongoDB-style operators:
+
+```typescript
+await userRepo.update(
+  { userId: "u1" },
+  {
+    name: "Alice", // set
+    age: undefined, // remove
+    score: { $plus: 10 }, // increment
+    score: { $minus: 5 }, // decrement
+    score: { $ifNotExists: 0 }, // set only if missing
+    tags: { $append: "vip" }, // list_append to end
+    tags: { $prepend: "featured" }, // list_append to front
+    followers: { $setAdd: "user-99" }, // ADD to DynamoDB set
+    followers: { $setDel: "user-99" }, // DELETE from DynamoDB set
+  },
+);
 ```
 
 #### Querying
@@ -142,7 +188,10 @@ Queries use a MongoDB-like syntax with operators like `$gt`, `$between`, `$prefi
 
 ```typescript
 // Query by partition key
-const admins = await userRepo.query({ userId: "u1" });
+const posts = await postRepo.query({ authorId: "u1" });
+
+// Query with sort key condition
+const recent = await postRepo.query({ authorId: "u1" }, { postId: { $gte: "2024-" } });
 
 // Query a GSI
 const adminsByDate = await userRepo.queryGsi("byRole", {
@@ -150,82 +199,153 @@ const adminsByDate = await userRepo.queryGsi("byRole", {
   createdAt: { $gt: 1700000000000 },
 });
 
+// Paginated query (async generator, one page at a time)
+for await (const page of postRepo.queryPaged({ authorId: "u1" }, { limit: 20 })) {
+  console.log(page);
+}
+
+// Paginated GSI query
+for await (const page of userRepo.queryGsiPaged("byRole", { role: "admin" })) {
+  console.log(page);
+}
+
 // Scan with filters
 const recentUsers = await userRepo.scan({
   filter: { createdAt: { $gte: 1700000000000 } },
 });
 
-// Paginated query with async iteration
-for await (const page of userRepo.queryGsiPaged("byRole", { role: "admin" })) {
-  console.log(page); // each page is an array of items
-}
+// Scan a GSI
+const allByStatus = await postRepo.scanGsi("byStatus");
+
+// Check existence (uses query or scan, no data returned)
+const hasAdmins = await userRepo.existsGsi("byRole", { query: { role: "admin" } });
+const exists = await postRepo.exists({ query: { authorId: "u1" } });
 ```
+
+Filter operators: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$between`, `$in`, `$nin`, `$prefix`, `$includes`, `$exists`, `$size`, `$type`.
 
 #### Batch Operations
 
 ```typescript
 // Batch get
-const { items, unprocessed } = await userRepo.batchGet([
-  { userId: "u1" },
-  { userId: "u2" },
-  { userId: "u3" },
-]);
+const { items, unprocessed } = await userRepo.batchGet([{ userId: "u1" }, { userId: "u2" }]);
 
-// Batch write (puts and deletes)
+// Batch get (throws on missing or unprocessed)
+const items = await userRepo.batchGetOrThrow([{ userId: "u1" }, { userId: "u2" }]);
+
+// Batch write (puts and deletes mixed)
 await userRepo.batchWrite([
   {
     type: "PUT",
-    item: {
-      userId: "u4",
-      email: "bob@example.com",
-      name: "Bob",
-      role: "user",
-      createdAt: Date.now(),
-    },
+    item: { userId: "u3", email: "c@d.com", name: "Carol", role: "user", createdAt: Date.now() },
   },
-  { type: "DELETE", key: { userId: "u3" } },
+  { type: "DELETE", key: { userId: "u2" } },
 ]);
+
+// Batch update (same update applied to multiple keys via PartiQL)
+await userRepo.batchUpdate([{ userId: "u1" }, { userId: "u3" }], { role: "admin" });
 ```
 
 #### Transactions
 
+`trxWrite` accepts plain request objects and executes them as a single DynamoDB transaction:
+
 ```typescript
 await userRepo.trxWrite(
-  userRepo.trxPut({
-    userId: "u5",
-    email: "eve@example.com",
-    name: "Eve",
-    role: "user",
-    createdAt: Date.now(),
-  }),
-  userRepo.trxUpdate({ userId: "u1" }, { role: "superadmin" }),
-  userRepo.trxDelete({ userId: "u2" }),
+  {
+    type: "PUT",
+    item: {
+      userId: "u5",
+      email: "eve@example.com",
+      name: "Eve",
+      role: "user",
+      createdAt: Date.now(),
+    },
+  },
+  { type: "UPDATE", key: { userId: "u1" }, update: { role: "superadmin" } },
+  { type: "DELETE", key: { userId: "u2" } },
+  { type: "CONDITION", key: { userId: "u3" }, condition: { role: "admin" } },
 );
 ```
 
-### Default Values
-
-To attach defaults like timestamps to every write, subclass `AbstractRepo` and override `defaultPutData` and/or `defaultUpdateData`:
+Convenience methods operate on multiple keys/items atomically:
 
 ```typescript
-import { AbstractRepo } from "dinah";
+// Transactional get
+const [u1, u2] = await userRepo.trxGet([{ userId: "u1" }, { userId: "u2" }]);
+const items = await userRepo.trxGetOrThrow([{ userId: "u1" }, { userId: "u2" }]);
 
-class UserRepo extends AbstractRepo<typeof UserTable> {
-  readonly table = UserTable;
-
-  override get defaultPutData() {
-    return { createdAt: Date.now() };
-  }
-
-  override get defaultUpdateData() {
-    return { updatedAt: Date.now() };
-  }
-}
-
-const userRepo = new UserRepo(db);
+// Transactional writes
+await userRepo.trxPut([item1, item2]);
+await userRepo.trxUpdate([{ userId: "u1" }, { userId: "u2" }], { role: "admin" });
+await userRepo.trxDelete([{ userId: "u1" }, { userId: "u2" }]);
+await userRepo.trxCreate([item1, item2]); // fails if any item already exists
 ```
 
-`defaultPutData` is merged under every `put` / `create` / `batchWrite` put / `trxPut` / `trxCreate`. `defaultUpdateData` is merged under every `update` / `trxUpdate`. Caller-provided values always win on conflict.
+To build cross-repo transactions, use the `*Request` methods to produce request objects and pass them to `db.trxWrite`:
+
+```typescript
+await db.trxWrite(
+  userRepo.trxPutRequest(userItem),
+  postRepo.trxDeleteRequest({ authorId: "u1", postId: "p1" }),
+);
+```
+
+## Repository Configuration
+
+`makeRepo` accepts a config object that controls defaults, transforms, and attribute rules. Extend the result to create a named repo class:
+
+```typescript
+class UserRepo extends makeRepo(UserTable, {
+  defaultPutData: () => ({ createdAt: Date.now() }),
+  defaultUpdateData: () => ({ updatedAt: Date.now() }),
+}) {}
+```
+
+`defaultPutData` is merged under every `put` / `create` / `batchWrite` put / `trxPut` / `trxCreate`. `defaultUpdateData` is merged under every `update` / `batchUpdate` / `trxUpdate`. Caller-provided values always win.
+
+### transformInput / transformOutput
+
+`transformInput` runs on every write (after defaults are merged) and receives a partial of the schema. `transformOutput` runs on every read and maps the stored shape to your desired return type:
+
+```typescript
+class UserRepo extends makeRepo(UserTable, {
+  transformInput: (item) => ({
+    ...item,
+    email: item.email?.toLowerCase(),
+  }),
+  transformOutput: (item): UserWithDisplayName => ({
+    ...item,
+    displayName: `${item.name} <${item.email}>`,
+  }),
+}) {}
+```
+
+Transforms are skipped when a `projection` option is provided, since only a subset of fields is available.
+
+### derivedAttributes / immutableAttributes
+
+`derivedAttributes` lists fields that are computed by `transformInput` and should never be written directly by the caller. They are stripped from put and update inputs:
+
+```typescript
+class UserRepo extends makeRepo(UserTable, {
+  transformInput: (item) => ({
+    ...item,
+    emailDomain: item.email ? item.email.split("@")[1] : undefined,
+  }),
+  derivedAttributes: ["emailDomain"],
+}) {}
+```
+
+`immutableAttributes` lists fields that may be set on create but must not be changed by updates:
+
+```typescript
+class UserRepo extends makeRepo(UserTable, {
+  immutableAttributes: ["createdAt"],
+}) {}
+```
+
+Both arrays are inferred as literal types — no `as const` needed.
 
 ## License
 
