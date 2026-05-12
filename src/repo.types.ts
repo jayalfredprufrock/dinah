@@ -41,7 +41,7 @@ export type GsiKey<R extends Repo<any>, G extends GsiNames<R>> = ExtractKey<
 
 export type Projection<R extends Repo<any>> = AllKeys<R["$schema"]>[];
 
-export type RepoOutput<R extends Repo<any>> = ReturnType<R["transformItem"]>;
+export type RepoOutput<R extends Repo<any>> = ReturnType<R["transformOutput"]>;
 
 export type ApplyProjection<R extends Repo<any>, O> = O extends {
   projection: Array<infer P extends AllKeys<R["$schema"]>>;

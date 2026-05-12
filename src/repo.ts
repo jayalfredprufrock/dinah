@@ -46,6 +46,7 @@ import type {
   TableGsiNames,
 } from "./repo.types";
 import type { Condition, ExtractTableDef, ExtractTableSchema, Obj } from "./types";
+import { isOperation } from "./expression-builder";
 
 // TODO: query/queryGsi needs strongly typed "key" argument
 // allows =,>,>=,<,<=,begins_with, between on sort key
@@ -76,7 +77,11 @@ export class Repo<T extends Table> {
     return {};
   }
 
-  transformItem(item: ExtractTableSchema<T>): ExtractTableSchema<T> {
+  transformOutput(item: ExtractTableSchema<T>): ExtractTableSchema<T> {
+    return item;
+  }
+
+  transformInput(item: Partial<ExtractTableSchema<T>>): Partial<ExtractTableSchema<T>> {
     return item;
   }
 
@@ -119,7 +124,7 @@ export class Repo<T extends Table> {
   }
 
   async put(item: RepoPutItem<this>, options?: RepoPutOptions<this>): Promise<RepoPutResult<this>> {
-    const itemWithDefaults = { ...this.defaultPutData, ...item };
+    const itemWithDefaults = this.transformInput({ ...this.defaultPutData, ...item });
     const result = await this.db.put({ table: this.tableName, item: itemWithDefaults, ...options });
     return this.applyTransformIfNeeded(result);
   }
@@ -129,11 +134,14 @@ export class Repo<T extends Table> {
     update: RepoUpdateData<ExtractTableSchema<T>>,
     options?: RepoUpdateOptions<this>,
   ): Promise<RepoUpdateResult<this>> {
-    const updateWithDefaults = { ...this.defaultUpdateData, ...update } as any;
+    const updateWithDefaults = this.applyNormalizersToExpression({
+      ...this.defaultUpdateData,
+      ...update,
+    });
     const result = await this.db.update({
       table: this.tableName,
       key: this.extractKey(key),
-      update: updateWithDefaults,
+      update: updateWithDefaults as any,
       ...options,
     });
     return this.applyTransformIfNeeded(result);
@@ -307,7 +315,7 @@ export class Repo<T extends Table> {
         if (request.type === "DELETE") {
           return { type: "DELETE", key: this.extractKey(request.key) };
         } else {
-          const itemWithDefaults = { ...this.defaultPutData, ...request.item };
+          const itemWithDefaults = this.transformInput({ ...this.defaultPutData, ...request.item });
           return { type: "PUT", item: itemWithDefaults };
         }
       }),
@@ -323,11 +331,14 @@ export class Repo<T extends Table> {
     keys: RepoKey<this>[],
     update: RepoUpdateData<ExtractTableSchema<T>>,
   ): Promise<RepoBatchUpdateResult<this>> {
-    const updateWithDefaults = { ...this.defaultUpdateData, ...update } as any;
+    const updateWithDefaults = this.applyNormalizersToExpression({
+      ...this.defaultUpdateData,
+      ...update,
+    });
     const result = await this.db.batchUpdate({
       [this.tableName]: {
         keys: keys.map((key) => this.extractKey(key)),
-        update: updateWithDefaults,
+        update: updateWithDefaults as any,
       },
     } as any);
     return {
@@ -460,7 +471,7 @@ export class Repo<T extends Table> {
     item: RepoPutItem<this>,
     options?: Omit<RepoPutOptions<this>, "return">,
   ): DbTrxWriteRequest {
-    const itemWithDefaults = { ...this.defaultPutData, ...item };
+    const itemWithDefaults = this.transformInput({ ...this.defaultPutData, ...item });
     return { table: this.tableName, type: "PUT", item: itemWithDefaults, ...options };
   }
 
@@ -469,12 +480,15 @@ export class Repo<T extends Table> {
     update: RepoUpdateData<ExtractTableSchema<T>>,
     options?: Omit<RepoUpdateOptions<this>, "return">,
   ): DbTrxWriteRequest {
-    const updateWithDefaults = { ...this.defaultUpdateData, ...update } as any;
+    const updateWithDefaults = this.applyNormalizersToExpression({
+      ...this.defaultUpdateData,
+      ...update,
+    });
     return {
       table: this.tableName,
       type: "UPDATE",
       key: this.extractKey(key),
-      update: updateWithDefaults,
+      update: updateWithDefaults as any,
       ...options,
     };
   }
@@ -491,7 +505,7 @@ export class Repo<T extends Table> {
       condition.$and.push(otherCondition);
     }
 
-    const itemWithDefaults = { ...this.defaultPutData, ...item };
+    const itemWithDefaults = this.transformInput({ ...this.defaultPutData, ...item });
 
     return {
       table: this.tableName,
@@ -500,6 +514,45 @@ export class Repo<T extends Table> {
       condition,
       ...otherOptions,
     };
+  }
+
+  private applyNormalizersToExpression(expression: Obj): Obj {
+    const partial: Obj = {};
+    for (const [key, val] of Object.entries(expression)) {
+      if (val === undefined) continue;
+      if (!isOperation(val)) {
+        partial[key] = val;
+      } else if (val.$set !== undefined) {
+        partial[key] = val.$set;
+      } else if (val.$ifNotExists !== undefined) {
+        partial[key] = Array.isArray(val.$ifNotExists) ? val.$ifNotExists[1] : val.$ifNotExists;
+      }
+    }
+
+    const normalized = this.transformInput(partial as Partial<ExtractTableSchema<T>>);
+
+    const result = { ...expression };
+    for (const [key, normalizedVal] of Object.entries(normalized)) {
+      if (key in partial) {
+        const original = expression[key];
+        if (!isOperation(original)) {
+          result[key] = normalizedVal;
+        } else if ((original as Obj).$set !== undefined) {
+          result[key] = { ...(original as Obj), $set: normalizedVal };
+        } else if ((original as Obj).$ifNotExists !== undefined) {
+          result[key] = {
+            ...(original as Obj),
+            $ifNotExists: Array.isArray((original as Obj).$ifNotExists)
+              ? [(original as Obj).$ifNotExists[0], normalizedVal]
+              : normalizedVal,
+          };
+        }
+      } else if (normalizedVal !== undefined) {
+        result[key] = normalizedVal;
+      }
+    }
+
+    return result;
   }
 
   protected applyTransformsIfNeeded(
@@ -514,7 +567,7 @@ export class Repo<T extends Table> {
       if (gsiProj === "KEYS_ONLY" || Array.isArray(gsiProj)) return items;
     }
 
-    return items.map((item) => this.transformItem(item as ExtractTableSchema<T>));
+    return items.map((item) => this.transformOutput(item as ExtractTableSchema<T>));
   }
 
   protected applyTransformIfNeeded(item: Obj, options?: { projection?: any[]; gsi?: string }): any {

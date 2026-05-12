@@ -541,14 +541,14 @@ class TransformRepo extends Repo<typeof TestTable> {
   constructor(db: Db) {
     super(db, TestTable);
   }
-  override transformItem(item: Item): Transformed {
+  override transformOutput(item: Item): Transformed {
     return { ...item, computed: 42 };
   }
 }
 
 declare const tRepo: TransformRepo;
 
-describe("transformItem return type narrowing", () => {
+describe("transformOutput return type narrowing", () => {
   test("get returns transformed item", async () => {
     const result = await tRepo.get({ pk: "a", sk: "b" });
     expectTypeOf(result).toEqualTypeOf<Transformed | undefined>();
