@@ -99,13 +99,18 @@ const UserTable = new Table(
 
 ### Using the Repository Class
 
-`Repo` is the recommended way to interact with DynamoDB. For a plain repo with no configuration, use `db.createRepo`:
+`Repo` is the recommended way to interact with DynamoDB. Use `db.makeRepo` to create a repo inline, with or without configuration:
 
 ```typescript
 const userRepo = db.makeRepo(UserTable);
+
+const userRepo = db.makeRepo(UserTable, {
+  defaultPutData: () => ({ createdAt: Date.now() }),
+  defaultUpdateData: () => ({ updatedAt: Date.now() }),
+});
 ```
 
-For repos with defaults, transforms, or attribute rules, use `makeRepo` to define a class (see [Repository Configuration](#repository-configuration)):
+To create a named, reusable repo class, use the standalone `makeRepo` (see [Repository Configuration](#repository-configuration)):
 
 ```typescript
 import { makeRepo } from "dinah";
