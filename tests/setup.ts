@@ -60,15 +60,10 @@ export const AuditTable = new Table(AuditSchema, {
   billingMode: "PAY_PER_REQUEST",
 });
 
-export class AuditRepo extends makeRepo(AuditTable) {
-  override get defaultPutData() {
-    return { createdAt: 1000, updatedAt: 1000 };
-  }
-
-  override get defaultUpdateData() {
-    return { updatedAt: 2000 };
-  }
-}
+export class AuditRepo extends makeRepo(AuditTable, {
+  defaultPutData: () => ({ createdAt: 1000, updatedAt: 1000 }),
+  defaultUpdateData: () => ({ updatedAt: 2000 }),
+}) {}
 
 export const ALL_TABLES = [UserTable, PostTable, AuditTable];
 

@@ -1,4 +1,4 @@
-import type { Repo } from "./repo";
+import type { RepoBase } from "./repo";
 import type { Table } from "./table";
 import type {
   AllKeys,
@@ -14,64 +14,64 @@ import type {
 } from "./types";
 
 //-----------------------------------------------------------------------------------------------------
-// Repository Types - all of these types should except a generic R of type Repo<any>
+// Repository Types - all of these types should except a generic R of type RepoBase
 //-----------------------------------------------------------------------------------------------------
 
-export type RepoKey<R extends Repo<any>> = Partial<R["$schema"]> &
+export type RepoKey<R extends RepoBase> = Partial<R["$schema"]> &
   ExtractKey<R["$schema"], R["$def"]>;
 
-export type RepoPutItem<R extends Repo<any>> = DistPartialSome<
-  R["$schema"],
-  keyof R["defaultPutData"]
+export type RepoPutItem<R extends RepoBase> = Omit<
+  DistPartialSome<R["$schema"], keyof R["defaultPutData"]>,
+  R["$derivedAttributes"]
 >;
 
-export type RepoUpdateItem<R extends Repo<any>> = DistPartialSome<
-  R["$schema"],
+export type RepoUpdateItem<R extends RepoBase> = DistPartialSome<
+  Omit<R["$schema"], R["$derivedAttributes"] | R["$immutableAttributes"]>,
   keyof R["defaultUpdateData"]
 >;
 
-export type GsiNames<R extends Repo<any>> = keyof R["table"]["def"]["gsis"] & string;
+export type GsiNames<R extends RepoBase> = keyof R["table"]["def"]["gsis"] & string;
 
 export type TableGsiNames<T extends Table> = keyof NonNullable<ExtractTableDef<T>["gsis"]> & string;
 
-export type GsiKey<R extends Repo<any>, G extends GsiNames<R>> = ExtractKey<
+export type GsiKey<R extends RepoBase, G extends GsiNames<R>> = ExtractKey<
   R["$schema"],
   GsiDef<R, G>
 >;
 
-export type Projection<R extends Repo<any>> = AllKeys<R["$schema"]>[];
+export type Projection<R extends RepoBase> = AllKeys<R["$schema"]>[];
 
-export type RepoOutput<R extends Repo<any>> = ReturnType<R["transformOutput"]>;
+export type RepoOutput<R extends RepoBase> = ReturnType<R["transformOutput"]>;
 
-export type ApplyProjection<R extends Repo<any>, O> = O extends {
+export type ApplyProjection<R extends RepoBase, O> = O extends {
   projection: Array<infer P extends AllKeys<R["$schema"]>>;
 }
   ? Pick<R["$schema"], P>
   : RepoOutput<R>;
 
-export type GsiProjectionType<R extends Repo<any>, G extends string> =
+export type GsiProjectionType<R extends RepoBase, G extends string> =
   GsiDef<R, G> extends { projection: infer P } ? P : undefined;
 
-type GsiDef<R extends Repo<any>, G extends string> = NonNullable<R["table"]["def"]["gsis"]>[G];
+type GsiDef<R extends RepoBase, G extends string> = NonNullable<R["table"]["def"]["gsis"]>[G];
 
-type TableKeyAttributes<R extends Repo<any>> =
+type TableKeyAttributes<R extends RepoBase> =
   | R["table"]["def"]["partitionKey"]
   | (R["table"]["def"]["sortKey"] & string);
 
-type GsiOwnKeyAttributes<R extends Repo<any>, G extends string> =
+type GsiOwnKeyAttributes<R extends RepoBase, G extends string> =
   | (ToUnion<GsiDef<R, G>["partitionKey"]> & string)
   | (ToUnion<GsiDef<R, G>["sortKey"]> & string);
 
-type GsiAllKeyAttributes<R extends Repo<any>, G extends string> =
+type GsiAllKeyAttributes<R extends RepoBase, G extends string> =
   | TableKeyAttributes<R>
   | GsiOwnKeyAttributes<R, G>;
 
-type GsiIncludedAttributes<R extends Repo<any>, G extends string> = Extract<
+type GsiIncludedAttributes<R extends RepoBase, G extends string> = Extract<
   GsiDef<R, G>["projection"],
   readonly any[]
 >[number];
 
-export type ApplyGsiProjection<R extends Repo<any>, O, G extends string> = O extends {
+export type ApplyGsiProjection<R extends RepoBase, O, G extends string> = O extends {
   projection: Array<infer P extends AllKeys<R["$schema"]>>;
 }
   ? Pick<R["$schema"], P | Extract<GsiAllKeyAttributes<R, G>, keyof R["$schema"]>>
@@ -84,66 +84,66 @@ export type ApplyGsiProjection<R extends Repo<any>, O, G extends string> = O ext
 
 // get ------------------------------------------------------------------------------------------------
 
-export interface RepoGetOptions<R extends Repo<any>> {
+export interface RepoGetOptions<R extends RepoBase> {
   consistent?: boolean;
   projection?: Projection<R>;
   filter?: (item: R["$schema"]) => boolean;
 }
 
-export type RepoGetResult<R extends Repo<any>, O extends RepoGetOptions<R>> =
+export type RepoGetResult<R extends RepoBase, O extends RepoGetOptions<R>> =
   | undefined
   | ApplyProjection<R, O>;
-export type RepoGetOrThrowResult<
-  R extends Repo<any>,
-  O extends RepoGetOptions<R>,
-> = ApplyProjection<R, O>;
+export type RepoGetOrThrowResult<R extends RepoBase, O extends RepoGetOptions<R>> = ApplyProjection<
+  R,
+  O
+>;
 
 // put ------------------------------------------------------------------------------------------------
 
-export interface RepoPutOptions<R extends Repo<any>> {
+export interface RepoPutOptions<R extends RepoBase> {
   condition?: Condition<R["$schema"]>;
 }
 
-export type RepoPutResult<R extends Repo<any>> = RepoOutput<R>;
+export type RepoPutResult<R extends RepoBase> = RepoOutput<R>;
 
 // create ---------------------------------------------------------------------------------------------
 
-export type RepoCreateItem<R extends Repo<any>> = RepoPutItem<R>;
+export type RepoCreateItem<R extends RepoBase> = RepoPutItem<R>;
 
-export interface RepoCreateOptions<R extends Repo<any>> {
+export interface RepoCreateOptions<R extends RepoBase> {
   condition?: Condition<R["$schema"]>;
 }
 
-export type RepoCreateResult<R extends Repo<any>> = RepoOutput<R>;
+export type RepoCreateResult<R extends RepoBase> = RepoOutput<R>;
 
 // update ---------------------------------------------------------------------------------------------
 
 export type RepoUpdateData<T = Obj> = UpdateExpression<T>;
 
-export interface RepoUpdateOptions<R extends Repo<any>> {
+export interface RepoUpdateOptions<R extends RepoBase> {
   condition?: Condition<R["$schema"]>;
 }
 
-export type RepoUpdateResult<R extends Repo<any>> = RepoOutput<R>;
+export type RepoUpdateResult<R extends RepoBase> = RepoOutput<R>;
 
 // delete ---------------------------------------------------------------------------------------------
 
-export interface RepoDeleteOptions<R extends Repo<any>> {
+export interface RepoDeleteOptions<R extends RepoBase> {
   condition?: Condition<R["$schema"]>;
 }
 
-export type RepoDeleteResult<R extends Repo<any>> = RepoOutput<R> | undefined;
-export type RepoDeleteOrThrowResult<R extends Repo<any>> = RepoOutput<R>;
+export type RepoDeleteResult<R extends RepoBase> = RepoOutput<R> | undefined;
+export type RepoDeleteOrThrowResult<R extends RepoBase> = RepoOutput<R>;
 
 // query ---------------------------------------------------------------------------------------------
 
-export type RepoQueryQuery<R extends Repo<any>> = Pick<
+export type RepoQueryQuery<R extends RepoBase> = Pick<
   R["$schema"],
-  R["table"]["def"]["partitionKey"]
+  Extract<R["table"]["def"]["partitionKey"], keyof R["$schema"]>
 > &
   SortKeyQuery<R["$schema"], R["table"]["def"]["sortKey"]>;
 
-export interface RepoQueryOptions<R extends Repo<any>> {
+export interface RepoQueryOptions<R extends RepoBase> {
   startKey?: RepoKey<R>;
   filter?: Condition<R["$schema"]>;
   projection?: Projection<R>;
@@ -152,13 +152,13 @@ export interface RepoQueryOptions<R extends Repo<any>> {
   sort?: "ASC" | "DESC";
 }
 
-export type RepoQueryResult<R extends Repo<any>, O extends RepoQueryOptions<R>> = ApplyProjection<
+export type RepoQueryResult<R extends RepoBase, O extends RepoQueryOptions<R>> = ApplyProjection<
   R,
   O
 >[];
 
 export type RepoQueryPagedResult<
-  R extends Repo<any>,
+  R extends RepoBase,
   O extends RepoQueryOptions<R>,
 > = AsyncGenerator<ApplyProjection<R, O>[]>;
 
@@ -187,7 +187,7 @@ export type RepoGsiStartKey<T extends Table, G extends string> = Pick<
 >;
 
 export interface RepoQueryGsiOptions<
-  R extends Repo<any>,
+  R extends RepoBase,
   T extends Table = Table,
   G extends string = string,
 > {
@@ -199,20 +199,20 @@ export interface RepoQueryGsiOptions<
 }
 
 export type RepoQueryGsiResult<
-  R extends Repo<any>,
+  R extends RepoBase,
   O extends RepoQueryGsiOptions<R>,
   G extends string = string,
 > = ApplyGsiProjection<R, O, G>[];
 
 export type RepoQueryGsiPagedResult<
-  R extends Repo<any>,
+  R extends RepoBase,
   O extends RepoQueryGsiOptions<R>,
   G extends string = string,
 > = AsyncGenerator<ApplyGsiProjection<R, O, G>[]>;
 
 // scan ----------------------------------------------------------------------------------------------
 
-export interface RepoScanOptions<R extends Repo<any>> {
+export interface RepoScanOptions<R extends RepoBase> {
   startKey?: RepoKey<R>;
   filter?: Condition<R["$schema"]>;
   projection?: Projection<R>;
@@ -221,19 +221,19 @@ export interface RepoScanOptions<R extends Repo<any>> {
   parallel?: number;
 }
 
-export type RepoScanResult<R extends Repo<any>, O extends RepoScanOptions<R>> = ApplyProjection<
+export type RepoScanResult<R extends RepoBase, O extends RepoScanOptions<R>> = ApplyProjection<
   R,
   O
 >[];
 
-export type RepoScanPagedResult<R extends Repo<any>, O extends RepoScanOptions<R>> = AsyncGenerator<
+export type RepoScanPagedResult<R extends RepoBase, O extends RepoScanOptions<R>> = AsyncGenerator<
   ApplyProjection<R, O>[]
 >;
 
 // scan gsi ------------------------------------------------------------------------------------------
 
 export interface RepoScanGsiOptions<
-  R extends Repo<any>,
+  R extends RepoBase,
   T extends Table = Table,
   G extends string = string,
 > {
@@ -245,20 +245,20 @@ export interface RepoScanGsiOptions<
 }
 
 export type RepoScanGsiResult<
-  R extends Repo<any>,
+  R extends RepoBase,
   O extends RepoScanGsiOptions<R>,
   G extends string = string,
 > = ApplyGsiProjection<R, O, G>[];
 
 export type RepoScanGsiPagedResult<
-  R extends Repo<any>,
+  R extends RepoBase,
   O extends RepoScanGsiOptions<R>,
   G extends string = string,
 > = AsyncGenerator<ApplyGsiProjection<R, O, G>[]>;
 
 // exists -------------------------------------------------------------------------------------------
 
-export interface RepoExistsOptions<R extends Repo<any>> {
+export interface RepoExistsOptions<R extends RepoBase> {
   query?: Obj;
   filter?: Condition<R["$schema"]>;
   consistent?: boolean;
@@ -266,18 +266,18 @@ export interface RepoExistsOptions<R extends Repo<any>> {
 
 // trx get -----------------------------------------------------------------------------------------
 
-export interface RepoTrxGetOptions<R extends Repo<any>> {
+export interface RepoTrxGetOptions<R extends RepoBase> {
   projection?: Projection<R>;
   filter?: (item: R["$schema"]) => boolean;
 }
 
-export type RepoTrxGetResult<R extends Repo<any>, O extends RepoTrxGetOptions<R>> = (
+export type RepoTrxGetResult<R extends RepoBase, O extends RepoTrxGetOptions<R>> = (
   | ApplyProjection<R, O>
   | undefined
 )[];
 
 export type RepoTrxGetOrThrowResult<
-  R extends Repo<any>,
+  R extends RepoBase,
   O extends RepoTrxGetOptions<R>,
 > = ApplyProjection<R, O>[];
 
@@ -285,33 +285,33 @@ export type RepoTrxGetRequestResult = { table: string };
 
 // trx write ----------------------------------------------------------------------------------------
 
-export interface RepoTrxDeleteRequest<R extends Repo<any>> {
+export interface RepoTrxDeleteRequest<R extends RepoBase> {
   type: "DELETE";
   key: RepoKey<R>;
   condition?: Condition<R["$schema"]>;
 }
 
-export interface RepoTrxPutRequest<R extends Repo<any>> {
+export interface RepoTrxPutRequest<R extends RepoBase> {
   type: "PUT";
   item: RepoPutItem<R>;
   condition?: Condition<R["$schema"]>;
 }
 
-export interface RepoTrxUpdateRequest<R extends Repo<any>> {
+export interface RepoTrxUpdateRequest<R extends RepoBase> {
   table: string;
   type: "UPDATE";
   key: RepoKey<R>;
-  update: RepoUpdateData<R["$schema"]>;
+  update: RepoUpdateData<Omit<R["$schema"], R["$derivedAttributes"] | R["$immutableAttributes"]>>;
   condition?: Condition<R["$schema"]>;
 }
 
-export interface RepoTrxConditionRequest<R extends Repo<any>> {
+export interface RepoTrxConditionRequest<R extends RepoBase> {
   type: "CONDITION";
   key: RepoKey<R>;
   condition: Condition<R["$schema"]>;
 }
 
-export type RepoTrxWriteRequest<R extends Repo<any>> =
+export type RepoTrxWriteRequest<R extends RepoBase> =
   | RepoTrxDeleteRequest<R>
   | RepoTrxPutRequest<R>
   | RepoTrxUpdateRequest<R>
@@ -319,52 +319,58 @@ export type RepoTrxWriteRequest<R extends Repo<any>> =
 
 // batch get ----------------------------------------------------------------------------------------
 
-export interface RepoBatchGetOptions<R extends Repo<any>> {
+export interface RepoBatchGetOptions<R extends RepoBase> {
   consistent?: boolean;
   projection?: Projection<R>;
   filter?: (item: R["$schema"]) => boolean;
 }
 
-export type RepoBatchGetResult<R extends Repo<any>, O extends RepoBatchGetOptions<R>> = {
+export type RepoBatchGetResult<R extends RepoBase, O extends RepoBatchGetOptions<R>> = {
   items: ApplyProjection<R, O>[];
   unprocessed?: RepoKey<R>[];
 };
 
 export type RepoBatchGetOrThrowResult<
-  R extends Repo<any>,
+  R extends RepoBase,
   O extends RepoBatchGetOptions<R>,
 > = ApplyProjection<R, O>[];
 
 // batch write --------------------------------------------------------------------------------------
 
-type RepoBatchWritePutRequest<R extends Repo<any>> = { type: "PUT"; item: RepoPutItem<R> };
-type RepoBatchWriteDeleteRequest<R extends Repo<any>> = { type: "DELETE"; key: RepoKey<R> };
+type RepoBatchWritePutRequest<R extends RepoBase> = {
+  type: "PUT";
+  item: RepoPutItem<R>;
+};
+type RepoBatchWriteDeleteRequest<R extends RepoBase> = {
+  type: "DELETE";
+  key: RepoKey<R>;
+};
 
-export type RepoBatchWrite<R extends Repo<any>> = (
+export type RepoBatchWrite<R extends RepoBase> = (
   | RepoBatchWritePutRequest<R>
   | RepoBatchWriteDeleteRequest<R>
 )[];
 
-export type RepoBatchWriteResult<R extends Repo<any>> = {
+export type RepoBatchWriteResult<R extends RepoBase> = {
   items: RepoPutItem<R>[];
   unprocessed?: RepoBatchWrite<R>;
 };
 
 // batch put ------------------------------------------------------------------------------------
 
-export type RepoBatchPutRequest<R extends Repo<any>> = RepoPutItem<R>[];
-export type RepoBatchPutResult<R extends Repo<any>> = {
+export type RepoBatchPutRequest<R extends RepoBase> = RepoPutItem<R>[];
+export type RepoBatchPutResult<R extends RepoBase> = {
   items: RepoPutItem<R>[];
   unprocessed?: RepoBatchPutRequest<R>;
 };
 
 // batch update ---------------------------------------------------------------------------------
 
-export type RepoBatchUpdateResult<R extends Repo<any>> = {
+export type RepoBatchUpdateResult<R extends RepoBase> = {
   unprocessed?: RepoKey<R>[];
 };
 
 // batch delete ---------------------------------------------------------------------------------
 
-export type RepoBatchDeleteRequest<R extends Repo<any>> = RepoKey<R>[];
-export type RepoBatchDeleteResponse<R extends Repo<any>> = RepoBatchDeleteRequest<R> | undefined;
+export type RepoBatchDeleteRequest<R extends RepoBase> = RepoKey<R>[];
+export type RepoBatchDeleteResponse<R extends RepoBase> = RepoBatchDeleteRequest<R> | undefined;

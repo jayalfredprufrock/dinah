@@ -52,37 +52,97 @@ import { isOperation } from "./expression-builder";
 // allows =,>,>=,<,<=,begins_with, between on sort key
 // util -> extractExclusiveStartKey(item)
 
-export class Repo<T extends Table> {
+// Minimal structural interface used as the constraint in repo.types.ts.
+// Keeps type helper constraints simple (R extends RepoBase) while the full
+// Repo class retains separate generic params for inference quality.
+export interface RepoBase {
+  readonly $schema: object;
+  readonly $def: { readonly partitionKey: string; readonly sortKey?: string };
+  readonly $derivedAttributes: PropertyKey;
+  readonly $immutableAttributes: PropertyKey;
+  readonly table: Table;
+  readonly defaultPutData: object;
+  readonly defaultUpdateData: object;
+  transformOutput(item: never): unknown;
+}
+
+export interface RepoConfig<
+  TSchema extends object,
+  TDefaults extends Partial<TSchema> = {},
+  TUpdateDefaults extends Partial<TSchema> = {},
+  TOutput = TSchema,
+  TDerived extends keyof TSchema = never,
+  TImmutable extends keyof TSchema = never,
+> {
+  defaultPutData?: () => TDefaults;
+  defaultUpdateData?: () => TUpdateDefaults;
+  transformInput?: (item: Partial<TSchema>) => Partial<TSchema>;
+  transformOutput?: (item: TSchema) => TOutput;
+  derivedAttributes?: readonly TDerived[];
+  immutableAttributes?: readonly TImmutable[];
+}
+
+export class Repo<
+  T extends Table,
+  TDefaults extends Partial<ExtractTableSchema<T>> = {},
+  TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
+  TOutput = ExtractTableSchema<T>,
+  TDerived extends keyof ExtractTableSchema<T> = never,
+  TImmutable extends keyof ExtractTableSchema<T> = never,
+> {
   // these phantom properties are used to pre-compute types derived from T
   // which allows easy lookups using the "this" Repo type
   declare readonly $schema: ExtractTableSchema<T>;
   declare readonly $def: ExtractTableDef<T>;
+  declare readonly $derivedAttributes: TDerived;
+  declare readonly $immutableAttributes: TImmutable;
 
   readonly table: T;
   readonly db: Db;
-  constructor(db: Db, table: T) {
+  private readonly config: RepoConfig<
+    ExtractTableSchema<T>,
+    TDefaults,
+    TUpdateDefaults,
+    TOutput,
+    TDerived,
+    TImmutable
+  >;
+
+  constructor(
+    db: Db,
+    table: T,
+    config?: RepoConfig<
+      ExtractTableSchema<T>,
+      TDefaults,
+      TUpdateDefaults,
+      TOutput,
+      TDerived,
+      TImmutable
+    >,
+  ) {
     this.db = db;
     this.table = table;
+    this.config = config ?? {};
   }
 
   get tableName(): string {
     return `${this.db.config?.tableNamePrefix ?? ""}${this.table.def.name}`;
   }
 
-  get defaultPutData(): Partial<ExtractTableSchema<T>> {
-    return {};
+  get defaultPutData(): TDefaults {
+    return (this.config.defaultPutData?.() ?? {}) as TDefaults;
   }
 
-  get defaultUpdateData(): Partial<ExtractTableSchema<T>> {
-    return {};
+  get defaultUpdateData(): TUpdateDefaults {
+    return (this.config.defaultUpdateData?.() ?? {}) as TUpdateDefaults;
   }
 
-  transformOutput(item: ExtractTableSchema<T>): ExtractTableSchema<T> {
-    return item;
+  transformOutput(item: ExtractTableSchema<T>): TOutput {
+    return (this.config.transformOutput?.(item) ?? item) as TOutput;
   }
 
   transformInput(item: Partial<ExtractTableSchema<T>>): Partial<ExtractTableSchema<T>> {
-    return item;
+    return this.config.transformInput?.(item) ?? item;
   }
 
   // TODO: should this throw if pk is missing?
@@ -124,14 +184,14 @@ export class Repo<T extends Table> {
   }
 
   async put(item: RepoPutItem<this>, options?: RepoPutOptions<this>): Promise<RepoPutResult<this>> {
-    const itemWithDefaults = this.transformInput({ ...this.defaultPutData, ...item });
+    const itemWithDefaults = this.applyPutTransforms(item);
     const result = await this.db.put({ table: this.tableName, item: itemWithDefaults, ...options });
     return this.applyTransformIfNeeded(result);
   }
 
   async update(
     key: RepoKey<this>,
-    update: RepoUpdateData<ExtractTableSchema<T>>,
+    update: RepoUpdateData<Omit<ExtractTableSchema<T>, TDerived | TImmutable>>,
     options?: RepoUpdateOptions<this>,
   ): Promise<RepoUpdateResult<this>> {
     const updateWithDefaults = this.applyNormalizersToExpression({
@@ -315,7 +375,7 @@ export class Repo<T extends Table> {
         if (request.type === "DELETE") {
           return { type: "DELETE", key: this.extractKey(request.key) };
         } else {
-          const itemWithDefaults = this.transformInput({ ...this.defaultPutData, ...request.item });
+          const itemWithDefaults = this.applyPutTransforms(request.item);
           return { type: "PUT", item: itemWithDefaults };
         }
       }),
@@ -329,7 +389,7 @@ export class Repo<T extends Table> {
 
   async batchUpdate(
     keys: RepoKey<this>[],
-    update: RepoUpdateData<ExtractTableSchema<T>>,
+    update: RepoUpdateData<Omit<ExtractTableSchema<T>, TDerived | TImmutable>>,
   ): Promise<RepoBatchUpdateResult<this>> {
     const updateWithDefaults = this.applyNormalizersToExpression({
       ...this.defaultUpdateData,
@@ -428,7 +488,7 @@ export class Repo<T extends Table> {
 
   async trxUpdate(
     keys: RepoKey<this>[],
-    update: RepoUpdateData<ExtractTableSchema<T>>,
+    update: RepoUpdateData<Omit<ExtractTableSchema<T>, TDerived | TImmutable>>,
     options?: Omit<RepoUpdateOptions<this>, "return">,
   ): Promise<void> {
     return this.db.trxWrite(...keys.map((key) => this.trxUpdateRequest(key, update, options)));
@@ -471,13 +531,13 @@ export class Repo<T extends Table> {
     item: RepoPutItem<this>,
     options?: Omit<RepoPutOptions<this>, "return">,
   ): DbTrxWriteRequest {
-    const itemWithDefaults = this.transformInput({ ...this.defaultPutData, ...item });
+    const itemWithDefaults = this.applyPutTransforms(item);
     return { table: this.tableName, type: "PUT", item: itemWithDefaults, ...options };
   }
 
   trxUpdateRequest(
     key: RepoKey<this>,
-    update: RepoUpdateData<ExtractTableSchema<T>>,
+    update: RepoUpdateData<Omit<ExtractTableSchema<T>, TDerived | TImmutable>>,
     options?: Omit<RepoUpdateOptions<this>, "return">,
   ): DbTrxWriteRequest {
     const updateWithDefaults = this.applyNormalizersToExpression({
@@ -505,7 +565,7 @@ export class Repo<T extends Table> {
       condition.$and.push(otherCondition);
     }
 
-    const itemWithDefaults = this.transformInput({ ...this.defaultPutData, ...item });
+    const itemWithDefaults = this.applyPutTransforms(item);
 
     return {
       table: this.tableName,
@@ -516,11 +576,21 @@ export class Repo<T extends Table> {
     };
   }
 
+  private applyPutTransforms(item: Obj): Partial<ExtractTableSchema<T>> {
+    const normalized = this.transformInput({ ...this.defaultPutData, ...item });
+    const result = { ...normalized } as Obj;
+    for (const key of this.config.derivedAttributes ?? []) {
+      delete result[key as string];
+    }
+    return result as Partial<ExtractTableSchema<T>>;
+  }
+
   private applyNormalizersToExpression(expression: Obj): Obj {
     const partial: Obj = {};
     for (const [key, val] of Object.entries(expression)) {
-      if (val === undefined) continue;
-      if (!isOperation(val)) {
+      if (val === undefined || (isOperation(val) && val.$remove === true)) {
+        partial[key] = undefined;
+      } else if (!isOperation(val)) {
         partial[key] = val;
       } else if (val.$set !== undefined) {
         partial[key] = val.$set;
@@ -533,7 +603,11 @@ export class Repo<T extends Table> {
 
     const result = { ...expression };
     for (const [key, normalizedVal] of Object.entries(normalized)) {
-      if (key in partial) {
+      if (normalizedVal === undefined) continue;
+      const wasRemove = key in partial && partial[key] === undefined;
+      if (wasRemove || !(key in partial)) {
+        result[key] = normalizedVal;
+      } else {
         const original = expression[key];
         if (!isOperation(original)) {
           result[key] = normalizedVal;
@@ -547,9 +621,14 @@ export class Repo<T extends Table> {
               : normalizedVal,
           };
         }
-      } else if (normalizedVal !== undefined) {
-        result[key] = normalizedVal;
       }
+    }
+
+    for (const key of [
+      ...(this.config.derivedAttributes ?? []),
+      ...(this.config.immutableAttributes ?? []),
+    ]) {
+      delete result[key as string];
     }
 
     return result;
@@ -576,16 +655,40 @@ export class Repo<T extends Table> {
   }
 }
 
-export interface MakeRepoResult<T extends Table> {
-  new (db: Db): Repo<T>;
+export interface MakeRepoResult<
+  T extends Table,
+  TDefaults extends Partial<ExtractTableSchema<T>> = {},
+  TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
+  TOutput = ExtractTableSchema<T>,
+  TDerived extends keyof ExtractTableSchema<T> = never,
+  TImmutable extends keyof ExtractTableSchema<T> = never,
+> {
+  new (db: Db): Repo<T, TDefaults, TUpdateDefaults, TOutput, TDerived, TImmutable>;
   readonly table: T;
 }
 
-export const makeRepo = <T extends Table>(table: T): MakeRepoResult<T> => {
-  return class extends Repo<T> {
+export const makeRepo = <
+  T extends Table,
+  TDefaults extends Partial<ExtractTableSchema<T>> = {},
+  TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
+  TOutput = ExtractTableSchema<T>,
+  const TDerived extends keyof ExtractTableSchema<T> = never,
+  const TImmutable extends keyof ExtractTableSchema<T> = never,
+>(
+  table: T,
+  config?: RepoConfig<
+    ExtractTableSchema<T>,
+    TDefaults,
+    TUpdateDefaults,
+    TOutput,
+    TDerived,
+    TImmutable
+  >,
+): MakeRepoResult<T, TDefaults, TUpdateDefaults, TOutput, TDerived, TImmutable> => {
+  return class extends Repo<T, TDefaults, TUpdateDefaults, TOutput, TDerived, TImmutable> {
     static readonly table = table;
     constructor(db: Db) {
-      super(db, table);
+      super(db, table, config);
     }
   };
 };
