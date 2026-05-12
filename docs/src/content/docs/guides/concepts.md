@@ -41,7 +41,7 @@ const UserTable = new Table(Type.Object({ userId: Type.String(), email: Type.Str
 });
 ```
 
-A `Table` holds no connection and does not talk to DynamoDB on its own. It is pure data: the schema and the definition. You pass it to `db.createRepo(table)` to get a typed `Repo`, or to `db.createTable(table)` to provision the physical table.
+A `Table` holds no connection and does not talk to DynamoDB on its own. It is pure data: the schema and the definition. You pass it to `db.makeRepo(table)` to get a typed `Repo`, or to `db.createTable(table)` to provision the physical table.
 
 `Table`'s type parameters enforce that every key reference is valid against the schema. If you write `partitionKey: "nope"` and `nope` is not a string or number field on the schema, the `Table` constructor call will not compile.
 
@@ -57,10 +57,10 @@ See the [`Table` reference](/reference/table/).
 - Validate GSI query arguments (partition key required, sort key optional) and `startKey` shapes.
 - Provide transaction helpers that return typed request objects.
 
-You usually get a `Repo` via `db.createRepo(table)`:
+You usually get a `Repo` via `db.makeRepo(table)`:
 
 ```typescript
-const userRepo = db.createRepo(UserTable);
+const userRepo = db.makeRepo(UserTable);
 await userRepo.put({ userId: "u1", email: "alice@example.com" /* … */ });
 ```
 

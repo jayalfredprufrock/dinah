@@ -4,8 +4,8 @@ import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
 import { AuditRepo, PostTable, UserTable, createDb, createTables, dropTables } from "./setup";
 
 const db = createDb();
-const userRepo = db.createRepo(UserTable);
-const postRepo = db.createRepo(PostTable);
+const userRepo = db.makeRepo(UserTable);
+const postRepo = db.makeRepo(PostTable);
 const auditRepo = new AuditRepo(db);
 
 beforeAll(async () => {
@@ -690,7 +690,7 @@ describe("Db direct operations", () => {
       { region: "us-east-1", endpoint: process.env.DYNAMODB_ENDPOINT ?? "http://localhost:8000" },
       { tableNamePrefix: "test-" },
     );
-    const repo = prefixedDb.createRepo(UserTable);
+    const repo = prefixedDb.makeRepo(UserTable);
     expect(repo.tableName).toBe("test-users");
   });
 });

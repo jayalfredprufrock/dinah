@@ -5,7 +5,7 @@ sidebar:
   order: 7
 ---
 
-`db.createRepo(table)` is enough for most cases, but Dinah also lets you subclass `AbstractRepo<T>` to get a typed repo with extra behavior attached. Subclassing is the way to add default values, computed fields, and domain-specific methods.
+`db.makeRepo(table)` is enough for most cases, but Dinah also lets you subclass `AbstractRepo<T>` to get a typed repo with extra behavior attached. Subclassing is the way to add default values, computed fields, and domain-specific methods.
 
 ## The base class
 
@@ -119,9 +119,9 @@ class PostRepo extends AbstractRepo<typeof PostTable> {
 
 All of `this.get`, `this.query`, `this.queryGsi`, `this.update`, `this.trxPut`, `this.trxUpdateRequest`, etc. are typed against the subclass's `table`, including the GSI name autocomplete and query-argument validation shown above.
 
-## Using a subclass through `db.createRepo`
+## Using a subclass through `db.makeRepo`
 
-`db.createRepo(table)` always returns a plain `Repo<T>`. If you want an instance of your subclass, construct it directly:
+`db.makeRepo(table)` always returns a plain `Repo<T>`. If you want an instance of your subclass, construct it directly:
 
 ```typescript
 const postRepo = new PostRepo(db);

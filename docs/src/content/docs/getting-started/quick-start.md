@@ -61,7 +61,7 @@ The `partitionKey`, optional `sortKey`, and each GSI's keys are validated agains
 ## 3. Create a Repo
 
 ```typescript
-const userRepo = db.createRepo(UserTable);
+const userRepo = db.makeRepo(UserTable);
 ```
 
 The returned `Repo` is typed against your schema. Every method below infers its argument and return types from `UserTable`.

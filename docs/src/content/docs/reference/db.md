@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-`Db` is the low-level client that wraps the AWS SDK v3 `DynamoDBDocumentClient`. It exposes operations that work against any table by name, plus cross-table batch and transaction methods. Use it directly for untyped utility code, or pass it to `createRepo()` / `new MyRepo(db)` to get a typed `Repo`.
+`Db` is the low-level client that wraps the AWS SDK v3 `DynamoDBDocumentClient`. It exposes operations that work against any table by name, plus cross-table batch and transaction methods. Use it directly for untyped utility code, or pass it to `makeRepo()` / `new MyRepo(db)` to get a typed `Repo`.
 
 ## Constructor
 
@@ -31,16 +31,16 @@ If `clientOrConfig.endpoint` is an empty string, Dinah normalizes it to `undefin
 
 ## Methods
 
-### `createRepo(table)`
+### `makeRepo(table)`
 
 ```typescript
-createRepo<T extends Table>(table: T): Repo<T>
+makeRepo<T extends Table>(table: T): Repo<T>
 ```
 
 Creates a new `Repo` bound to this `Db` and the given `Table`. The returned repo's type is inferred from the table's schema and definition.
 
 ```typescript
-const userRepo = db.createRepo(UserTable);
+const userRepo = db.makeRepo(UserTable);
 ```
 
 ### `createTable(table)`

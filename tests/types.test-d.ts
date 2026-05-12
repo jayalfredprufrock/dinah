@@ -41,7 +41,7 @@ const TestTable = new Table(Schema, {
 });
 
 declare const db: Db;
-const repo = db.createRepo(TestTable);
+const repo = db.makeRepo(TestTable);
 
 describe("get / query / scan return types", () => {
   test("get returns full item by default", async () => {
@@ -206,7 +206,7 @@ const catTable = new Table(Cat, {
     byBreed: { partitionKey: "breed" },
   },
 });
-const catRepo = db.createRepo(catTable);
+const catRepo = db.makeRepo(catTable);
 
 async function reproCat() {
   return catRepo.queryGsi("byBreed", { breed: "calico" });
@@ -244,7 +244,7 @@ const UnionTable = new Table(UnionSchema, {
   sortKey: "sk",
   gsis: { byKind: { partitionKey: "kind", sortKey: "sk" } },
 });
-const unionRepo = db.createRepo(UnionTable);
+const unionRepo = db.makeRepo(UnionTable);
 
 describe("Table def validation", () => {
   test("partitionKey must be a valid schema field", () => {
@@ -360,7 +360,7 @@ const MultiKeyTable = new Table(MultiKeySchema, {
   },
 });
 
-const mkRepo = db.createRepo(MultiKeyTable);
+const mkRepo = db.makeRepo(MultiKeyTable);
 
 describe("multi-key GSI query argument types", () => {
   test("multi-key PK requires all partition key fields", () => {
@@ -668,7 +668,7 @@ describe("sort key operator typing — number sort key (GSI)", () => {
       partitionKey: "pk",
       gsis: { byPk: { partitionKey: "pk", sortKey: "sk" } },
     });
-    const optRepo = db.createRepo(OptTable);
+    const optRepo = db.makeRepo(OptTable);
     await optRepo.queryGsi("byPk", { pk: "a", sk: { $lte: 10 } });
     await optRepo.queryGsi("byPk", { pk: "a", sk: { $between: [1, 100] } });
   });
@@ -791,7 +791,7 @@ const CondTable = new Table(CondSchema, {
   partitionKey: "userId",
   gsis: { byName: { partitionKey: "name", sortKey: "age" } },
 });
-const condRepo = db.createRepo(CondTable);
+const condRepo = db.makeRepo(CondTable);
 
 describe("condition typing — valid expressions", () => {
   test("shorthand $eq (direct value)", () => {

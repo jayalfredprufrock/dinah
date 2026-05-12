@@ -102,7 +102,7 @@ const UserTable = new Table(
 `Repo` is the recommended way to interact with DynamoDB. For a plain repo with no configuration, use `db.createRepo`:
 
 ```typescript
-const userRepo = db.createRepo(UserTable);
+const userRepo = db.makeRepo(UserTable);
 ```
 
 For repos with defaults, transforms, or attribute rules, use `makeRepo` to define a class (see [Repository Configuration](#repository-configuration)):

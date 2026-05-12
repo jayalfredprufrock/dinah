@@ -13,7 +13,7 @@ import {
 import type { TransactGetCommandInput, TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
 import * as Lib from "@aws-sdk/lib-dynamodb";
 import { ExpressionBuilder } from "./expression-builder";
-import { Repo } from "./repo";
+import { Repo, type RepoConfig } from "./repo";
 import type { Table } from "./table";
 import type {
   DbBatchGet,
@@ -36,7 +36,7 @@ import type {
   DbTrxWriteRequest,
   DbUpdate,
 } from "./db.types";
-import type { Obj } from "./types";
+import type { ExtractTableSchema, Obj } from "./types";
 import { extractTableDesc, removeUndefined } from "./util";
 
 // TODO
@@ -78,8 +78,25 @@ export class Db {
     this.config = dbConfig;
   }
 
-  createRepo<T extends Table>(table: T): Repo<T> {
-    return new Repo(this, table);
+  makeRepo<
+    T extends Table,
+    TDefaults extends Partial<ExtractTableSchema<T>> = {},
+    TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
+    TOutput = ExtractTableSchema<T>,
+    const TDerived extends keyof ExtractTableSchema<T> = never,
+    const TImmutable extends keyof ExtractTableSchema<T> = never,
+  >(
+    table: T,
+    config?: RepoConfig<
+      ExtractTableSchema<T>,
+      TDefaults,
+      TUpdateDefaults,
+      TOutput,
+      TDerived,
+      TImmutable
+    >,
+  ): Repo<T, TDefaults, TUpdateDefaults, TOutput, TDerived, TImmutable> {
+    return new Repo(this, table, config);
   }
 
   async createTable(table: Table): Promise<void> {

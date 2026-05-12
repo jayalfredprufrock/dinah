@@ -10,7 +10,7 @@ sidebar:
 Every method below is inherited by any subclass of `AbstractRepo`.
 
 ```typescript
-const userRepo = db.createRepo(UserTable);
+const userRepo = db.makeRepo(UserTable);
 // equivalent to:
 const userRepo = new Repo(db, UserTable);
 ```
