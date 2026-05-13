@@ -74,6 +74,7 @@ export interface RepoConfig<
   TDerived extends keyof TSchema = never,
   TImmutable extends keyof TSchema = never,
 > {
+  resourceName?: string;
   defaultPutData?: () => TDefaults;
   defaultUpdateData?: () => TUpdateDefaults;
   transformInput?: (item: Partial<TSchema>) => Partial<TSchema>;
@@ -129,6 +130,16 @@ export class Repo<
     return `${this.db.config?.tableNamePrefix ?? ""}${this.table.def.name}`;
   }
 
+  get resourceName(): string {
+    if (this.config.resourceName) return this.config.resourceName;
+    const clsName = this.constructor.name;
+    if (clsName && clsName !== "Repo") {
+      return clsName.replace(/Repo$/i, "") || clsName;
+    }
+    const t = this.table.def.name;
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+
   get defaultPutData(): TDefaults {
     return (this.config.defaultPutData?.() ?? {}) as TDefaults;
   }
@@ -178,6 +189,7 @@ export class Repo<
     const item = await this.db.getOrThrow({
       table: this.tableName,
       key: this.extractKey(key),
+      resource: this.resourceName,
       ...options,
     } as any);
     return this.applyTransformIfNeeded(item, options);
@@ -185,7 +197,12 @@ export class Repo<
 
   async put(item: RepoPutItem<this>, options?: RepoPutOptions<this>): Promise<RepoPutResult<this>> {
     const itemWithDefaults = this.applyPutTransforms(item);
-    const result = await this.db.put({ table: this.tableName, item: itemWithDefaults, ...options });
+    const result = await this.db.put({
+      table: this.tableName,
+      item: itemWithDefaults,
+      resource: this.resourceName,
+      ...options,
+    });
     return this.applyTransformIfNeeded(result);
   }
 
@@ -201,6 +218,7 @@ export class Repo<
     const result = await this.db.update({
       table: this.tableName,
       key: this.extractKey(key),
+      resource: this.resourceName,
       update: updateWithDefaults as any,
       ...options,
     });
@@ -229,6 +247,7 @@ export class Repo<
     const item = await this.db.delete({
       table: this.tableName,
       key: this.extractKey(key),
+      resource: this.resourceName,
       ...options,
     });
     return item && this.applyTransformIfNeeded(item);
@@ -241,6 +260,7 @@ export class Repo<
     const item = await this.db.deleteOrThrow({
       table: this.tableName,
       key: this.extractKey(key),
+      resource: this.resourceName,
       ...options,
     });
     return this.applyTransformIfNeeded(item);
@@ -364,7 +384,11 @@ export class Repo<
     options?: O,
   ): Promise<RepoBatchGetOrThrowResult<this, O>> {
     const result = await this.db.batchGetOrThrow({
-      [this.tableName]: { keys: keys.map((key) => this.extractKey(key)), ...options },
+      [this.tableName]: {
+        keys: keys.map((key) => this.extractKey(key)),
+        resource: this.resourceName,
+        ...options,
+      },
     } as any);
     return this.applyTransformsIfNeeded(result[this.tableName] ?? [], options);
   }
@@ -433,6 +457,7 @@ export class Repo<
           ({
             table: this.tableName,
             key: this.extractKey(key),
+            resource: this.resourceName,
             ...options,
           }) as any,
       ),

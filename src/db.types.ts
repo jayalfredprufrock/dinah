@@ -11,6 +11,7 @@ export interface DbListTables {
 export interface DbGet<T = Obj> {
   table: string;
   key: Partial<T>;
+  resource?: string;
   consistent?: boolean;
   projection?: AllKeys<T>[];
   filter?: (item: T) => boolean;
@@ -19,6 +20,7 @@ export interface DbGet<T = Obj> {
 export interface DbPut<T = Obj> {
   table: string;
   item: T;
+  resource?: string;
   returnOld?: boolean;
   condition?: Condition<T>;
 }
@@ -33,6 +35,7 @@ export interface DbCreate<T = Obj> {
 export interface DbUpdate<T = Obj> {
   table: string;
   key: Partial<T>;
+  resource?: string;
   update: UpdateExpression<T>;
   condition?: Condition<T>;
 }
@@ -48,6 +51,7 @@ export interface DbUpsert<T = Obj> {
 export interface DbDelete<T = Obj> {
   table: string;
   key: Partial<T>;
+  resource?: string;
   condition?: Condition<T>;
 }
 
@@ -85,6 +89,7 @@ export interface DbExists<T = Obj> {
 
 export interface DbBatchGetRequest<T = Obj> {
   keys: Partial<T>[];
+  resource?: string;
   consistent?: boolean;
   projection?: AllKeys<T>[];
   filter?: (item: T) => boolean;
@@ -130,6 +135,7 @@ export interface DbBatchUpdateResponse {
 export interface DbTrxGetRequest<T = Obj> {
   table: string;
   key: Partial<T>;
+  resource?: string;
   projection?: AllKeys<T>[];
   filter?: (item: T) => boolean;
 }

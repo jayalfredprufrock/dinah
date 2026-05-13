@@ -1,14 +1,17 @@
 import {
   type BatchGetItemInput,
   type BatchWriteItemInput,
+  ConditionalCheckFailedException,
   CreateTableCommand,
   DeleteTableCommand,
   DynamoDB,
   DynamoDBClient,
   type DynamoDBClientConfig,
   ListTablesCommand,
+  TransactionCanceledException,
   type WriteRequest,
 } from "@aws-sdk/client-dynamodb";
+import { DinahError } from "./error";
 //import { DynamoDBStreams } from '@aws-sdk/client-dynamodb-streams';
 import type { TransactGetCommandInput, TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
 import * as Lib from "@aws-sdk/lib-dynamodb";
@@ -147,7 +150,11 @@ export class Db {
   async getOrThrow<T = Obj>(data: DbGet<T>): Promise<T> {
     const item = await this.get<T>(data);
     if (!item) {
-      throw new Error(`Item not found in "${data.table}" table.`);
+      throw new DinahError({
+        type: "NOT_FOUND",
+        key: data.key as Record<string, unknown>,
+        resource: data.resource,
+      });
     }
     return item;
   }
@@ -167,9 +174,18 @@ export class Db {
       ExpressionAttributeValues: exp.attributeValues,
     });
 
-    const output = await this.client.send(input);
-
-    return (data.returnOld ? output.Attributes : item) as T;
+    try {
+      const output = await this.client.send(input);
+      return (data.returnOld ? output.Attributes : item) as T;
+    } catch (err) {
+      if (err instanceof ConditionalCheckFailedException) {
+        throw new DinahError(
+          { type: "CONDITIONAL_CHECK_FAILED", resource: data.resource },
+          { cause: err },
+        );
+      }
+      throw err;
+    }
   }
 
   async update<T = Obj>(data: DbUpdate<T>): Promise<T> {
@@ -196,9 +212,22 @@ export class Db {
       ExpressionAttributeValues: exp.attributeValues,
     });
 
-    const output = await this.client.send(input);
-
-    return output.Attributes as T;
+    try {
+      const output = await this.client.send(input);
+      return output.Attributes as T;
+    } catch (err) {
+      if (err instanceof ConditionalCheckFailedException) {
+        throw new DinahError(
+          {
+            type: "CONDITIONAL_CHECK_FAILED",
+            key: data.key as Record<string, unknown>,
+            resource: data.resource,
+          },
+          { cause: err },
+        );
+      }
+      throw err;
+    }
   }
 
   async delete<T = Obj>(data: DbDelete<T>): Promise<T | undefined> {
@@ -214,15 +243,32 @@ export class Db {
       ExpressionAttributeValues: exp.attributeValues,
     });
 
-    const output = await this.client.send(input);
-
-    return output.Attributes as T | undefined;
+    try {
+      const output = await this.client.send(input);
+      return output.Attributes as T | undefined;
+    } catch (err) {
+      if (err instanceof ConditionalCheckFailedException) {
+        throw new DinahError(
+          {
+            type: "CONDITIONAL_CHECK_FAILED",
+            key: data.key as Record<string, unknown>,
+            resource: data.resource,
+          },
+          { cause: err },
+        );
+      }
+      throw err;
+    }
   }
 
   async deleteOrThrow<T = Obj>(data: DbDelete<T>): Promise<T> {
     const item = await this.delete<T>(data);
     if (!item) {
-      throw new Error(`Item not found in "${data.table}" table.`);
+      throw new DinahError({
+        type: "NOT_FOUND",
+        key: data.key as Record<string, unknown>,
+        resource: data.resource,
+      });
     }
     return item;
   }
@@ -468,7 +514,8 @@ export class Db {
       }
 
       if (items[table]?.length !== data[table]?.keys?.length) {
-        throw new Error(`One or more items were not found in "${table}" table.`);
+        // Key identity is not tracked through batchGet — key: {} is a known limitation here.
+        throw new DinahError({ type: "NOT_FOUND", key: {}, resource: data[table]?.resource });
       }
     }
 
@@ -655,7 +702,11 @@ export class Db {
     const items = await this.trxGet(...requests);
     for (let i = 0; i < items.length; i++) {
       if (!items[i]) {
-        throw new Error(`One or more items were not found in "${requests[i]?.table}" table.`);
+        throw new DinahError({
+          type: "NOT_FOUND",
+          key: (requests[i]?.key ?? {}) as Record<string, unknown>,
+          resource: requests[i]?.resource,
+        });
       }
     }
 
@@ -703,7 +754,23 @@ export class Db {
     });
 
     const input = new Lib.TransactWriteCommand({ TransactItems: trxItems });
-    await this.client.send(input);
+    try {
+      await this.client.send(input);
+    } catch (err) {
+      if (err instanceof TransactionCanceledException) {
+        throw new DinahError(
+          {
+            type: "TRANSACTION_CANCELED",
+            reasons: (err.CancellationReasons ?? []).map((r) => ({
+              type: r.Code ?? "Unknown",
+              message: r.Message,
+            })),
+          },
+          { cause: err },
+        );
+      }
+      throw err;
+    }
   }
 
   /* Dynamodb Streams */

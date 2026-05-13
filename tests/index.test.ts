@@ -1,12 +1,56 @@
 // @ts-nocheck
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
+import { DinahError, isDinahError } from "../src";
 import { AuditRepo, PostTable, UserTable, createDb, createTables, dropTables } from "./setup";
 
 const db = createDb();
 const userRepo = db.makeRepo(UserTable);
 const postRepo = db.makeRepo(PostTable);
 const auditRepo = new AuditRepo(db);
+
+// ─── DinahError unit tests (no DynamoDB needed) ────────────────────────────────
+
+describe("DinahError", () => {
+  test("isDinahError returns true for DinahError", () => {
+    expect(isDinahError(new DinahError({ type: "NOT_FOUND", key: {} }))).toBe(true);
+  });
+
+  test("isDinahError returns false for plain Error and non-errors", () => {
+    expect(isDinahError(new Error("oops"))).toBe(false);
+    expect(isDinahError("string")).toBe(false);
+    expect(isDinahError(null)).toBe(false);
+  });
+
+  test("NOT_FOUND can be constructed and narrowed", () => {
+    const err = new DinahError({ type: "NOT_FOUND", key: { userId: "u1" } });
+    expect(err).toBeInstanceOf(DinahError);
+    expect(err.name).toBe("DinahError");
+    expect(err.details.type).toBe("NOT_FOUND");
+    if (err.details.type === "NOT_FOUND") {
+      expect(err.details.key).toEqual({ userId: "u1" });
+    }
+  });
+
+  test("CONDITIONAL_CHECK_FAILED can be constructed and narrowed", () => {
+    const cause = new Error("aws error");
+    const err = new DinahError({ type: "CONDITIONAL_CHECK_FAILED", key: { id: "x" } }, { cause });
+    expect(err.details.type).toBe("CONDITIONAL_CHECK_FAILED");
+    expect(err.cause).toBe(cause);
+  });
+
+  test("TRANSACTION_CANCELED can be constructed and narrowed", () => {
+    const err = new DinahError({
+      type: "TRANSACTION_CANCELED",
+      reasons: [{ type: "ConditionalCheckFailed" }, { type: "None" }],
+    });
+    expect(err.details.type).toBe("TRANSACTION_CANCELED");
+    if (err.details.type === "TRANSACTION_CANCELED") {
+      expect(err.details.reasons[0].type).toBe("ConditionalCheckFailed");
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 beforeAll(async () => {
   await dropTables(db);
@@ -38,8 +82,11 @@ describe("put and get", () => {
     expect(result).toBeUndefined();
   });
 
-  test("getOrThrow throws for missing item", async () => {
-    await expect(userRepo.getOrThrow({ userId: "nonexistent" })).rejects.toThrow("not found");
+  test("getOrThrow throws DinahError NOT_FOUND for missing item", async () => {
+    const err = await userRepo.getOrThrow({ userId: "nonexistent" }).catch((e) => e);
+    expect(err).toBeInstanceOf(DinahError);
+    expect(err.details.type).toBe("NOT_FOUND");
+    expect(err.details.key).toEqual({ userId: "nonexistent" });
   });
 
   test("get with projection returns only requested fields", async () => {
@@ -76,7 +123,7 @@ describe("create", () => {
     expect(result).toMatchObject(item);
   });
 
-  test("fails when item already exists", async () => {
+  test("fails when item already exists with DinahError CONDITIONAL_CHECK_FAILED", async () => {
     const item = {
       userId: "u-create",
       email: "c@d.com",
@@ -84,7 +131,10 @@ describe("create", () => {
       role: "user",
       createdAt: 200,
     };
-    await expect(userRepo.create(item)).rejects.toThrow(ConditionalCheckFailedException);
+    const err = await userRepo.create(item).catch((e) => e);
+    expect(err).toBeInstanceOf(DinahError);
+    expect(err.details.type).toBe("CONDITIONAL_CHECK_FAILED");
+    expect(err.cause).toBeDefined();
   });
 });
 
@@ -112,12 +162,12 @@ describe("update", () => {
         { name: "Should Not Apply" },
         { condition: { role: "viewer" } },
       ),
-    ).rejects.toThrow(ConditionalCheckFailedException);
+    ).rejects.toThrow(DinahError);
   });
 
   test("update on nonexistent item throws (implicit exists condition)", async () => {
     await expect(userRepo.update({ userId: "nonexistent" }, { name: "nope" })).rejects.toThrow(
-      ConditionalCheckFailedException,
+      DinahError,
     );
   });
 
@@ -187,7 +237,7 @@ describe("delete", () => {
   });
 
   test("deleteOrThrow throws for missing item", async () => {
-    await expect(userRepo.deleteOrThrow({ userId: "nonexistent" })).rejects.toThrow("not found");
+    await expect(userRepo.deleteOrThrow({ userId: "nonexistent" })).rejects.toThrow(DinahError);
   });
 
   test("delete with condition", async () => {
@@ -201,7 +251,7 @@ describe("delete", () => {
 
     await expect(
       userRepo.delete({ userId: "u-del-cond" }, { condition: { role: "viewer" } }),
-    ).rejects.toThrow(ConditionalCheckFailedException);
+    ).rejects.toThrow(DinahError);
 
     // should still exist
     const still = await userRepo.get({ userId: "u-del-cond" });
@@ -467,7 +517,7 @@ describe("batchGet", () => {
   test("batchGetOrThrow throws when items are missing", async () => {
     await expect(
       userRepo.batchGetOrThrow([{ userId: "bg1" }, { userId: "nonexistent-batch" }]),
-    ).rejects.toThrow("not found");
+    ).rejects.toThrow(DinahError);
   });
 });
 
@@ -597,7 +647,7 @@ describe("transactions", () => {
   test("trxGetOrThrow throws when an item is missing", async () => {
     await expect(
       userRepo.trxGetOrThrow([{ userId: "trx-new" }, { userId: "nonexistent-trx" }]),
-    ).rejects.toThrow("not found");
+    ).rejects.toThrow(DinahError);
   });
 
   test("trxPut puts multiple items", async () => {
