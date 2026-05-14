@@ -89,7 +89,9 @@ describe("get / query / scan return types", () => {
 describe("queryGsi return types", () => {
   test("ALL projection (default) returns full items", async () => {
     const result = await repo.queryGsi("allGsi", { gsiPk: "a" });
-    expectTypeOf(result).toEqualTypeOf<Item[]>();
+    expectTypeOf(result).toEqualTypeOf<
+      (Omit<Item, "gsiPk" | "gsiSk"> & { gsiPk: string; gsiSk: number })[]
+    >();
   });
 
   test("KEYS_ONLY projection returns only key attributes", async () => {
@@ -125,7 +127,7 @@ describe("queryGsi query argument types", () => {
 
   test("call site: pk-only GSI accepts pk-only query", async () => {
     const result = await repo.queryGsi("pkOnlyGsi", { gsiPk: "a" });
-    expectTypeOf(result).toEqualTypeOf<Item[]>();
+    expectTypeOf(result).toEqualTypeOf<(Omit<Item, "gsiPk"> & { gsiPk: string })[]>();
   });
 
   test("rejects missing partition key", () => {
@@ -463,7 +465,15 @@ describe("multi-key GSI projection return types", () => {
       tenantId: "t1",
       region: "us",
     });
-    expectTypeOf(result).toEqualTypeOf<MultiKeyItem[]>();
+    expectTypeOf(result).toEqualTypeOf<
+      (Omit<MultiKeyItem, "tenantId" | "region" | "round" | "bracket" | "matchId"> & {
+        tenantId: string;
+        region: string;
+        round: string;
+        bracket: string;
+        matchId: string;
+      })[]
+    >();
   });
 });
 
@@ -493,12 +503,51 @@ describe("multi-key GSI table def validation", () => {
 describe("scanGsi return types", () => {
   test("ALL projection returns full items", async () => {
     const result = await repo.scanGsi("allGsi");
-    expectTypeOf(result).toEqualTypeOf<Item[]>();
+    expectTypeOf(result).toEqualTypeOf<
+      (Omit<Item, "gsiPk" | "gsiSk"> & { gsiPk: string; gsiSk: number })[]
+    >();
   });
 
   test("KEYS_ONLY projection returns only key attributes", async () => {
     const result = await repo.scanGsi("keysOnlyGsi");
     expectTypeOf(result).toEqualTypeOf<Pick<Item, "pk" | "sk" | "gsiPk" | "gsiSk">[]>();
+  });
+});
+
+// GSI key promotion — optional GSI key fields become required in queryGsi/scanGsi results
+const OptGsiSchema = Type.Object({
+  id: Type.String(),
+  category: Type.Optional(Type.String()),
+  score: Type.Optional(Type.Number()),
+  name: Type.String(),
+});
+const OptGsiTable = new Table(OptGsiSchema, {
+  name: "opt-gsi",
+  partitionKey: "id",
+  gsis: {
+    byCategory: { partitionKey: "category", sortKey: "score" },
+    byCategoryOnly: { partitionKey: "category" },
+  },
+});
+declare const optRepo: ReturnType<typeof db.makeRepo<typeof OptGsiTable>>;
+type OptItem = { id: string; category?: string; score?: number; name: string };
+type OptItemWithGsiKeys = Omit<OptItem, "category" | "score"> & { category: string; score: number };
+type OptItemWithCategoryOnly = Omit<OptItem, "category"> & { category: string };
+
+describe("GSI optional key promotion", () => {
+  test("queryGsi makes optional GSI pk+sk required in result", async () => {
+    const result = await optRepo.queryGsi("byCategory", { category: "a" });
+    expectTypeOf(result).toEqualTypeOf<OptItemWithGsiKeys[]>();
+  });
+
+  test("queryGsi pk-only GSI only promotes pk", async () => {
+    const result = await optRepo.queryGsi("byCategoryOnly", { category: "a" });
+    expectTypeOf(result).toEqualTypeOf<OptItemWithCategoryOnly[]>();
+  });
+
+  test("scanGsi makes optional GSI pk+sk required in result", async () => {
+    const result = await optRepo.scanGsi("byCategory");
+    expectTypeOf(result).toEqualTypeOf<OptItemWithGsiKeys[]>();
   });
 });
 
@@ -551,9 +600,11 @@ describe("transformOutput return type narrowing", () => {
     expectTypeOf(result).toEqualTypeOf<Transformed[]>();
   });
 
-  test("queryGsi ALL returns transformed items", async () => {
+  test("queryGsi ALL returns transformed items with GSI keys required", async () => {
     const result = await tRepo.queryGsi("allGsi", { gsiPk: "a" });
-    expectTypeOf(result).toEqualTypeOf<Transformed[]>();
+    expectTypeOf(result).toEqualTypeOf<
+      (Omit<Transformed, "gsiPk" | "gsiSk"> & { gsiPk: string; gsiSk: number })[]
+    >();
   });
 
   test("queryGsi KEYS_ONLY does NOT transform (returns raw pick)", async () => {

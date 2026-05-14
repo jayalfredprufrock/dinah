@@ -71,12 +71,15 @@ type GsiIncludedAttributes<R extends RepoBase, G extends string> = Extract<
   readonly any[]
 >[number];
 
+type MakeRequired<T, K extends keyof any> = Omit<T, Extract<K, keyof T>> &
+  Required<Pick<T, Extract<K, keyof T>>>;
+
 export type ApplyGsiProjection<R extends RepoBase, O, G extends string> = O extends {
   projection: Array<infer P extends AllKeys<R["$schema"]>>;
 }
   ? Pick<R["$schema"], P | Extract<GsiAllKeyAttributes<R, G>, keyof R["$schema"]>>
   : GsiProjectionType<R, G> extends "ALL" | undefined
-    ? RepoOutput<R>
+    ? MakeRequired<RepoOutput<R>, Extract<GsiOwnKeyAttributes<R, G>, keyof RepoOutput<R>>>
     : Pick<
         R["$schema"],
         Extract<GsiAllKeyAttributes<R, G> | GsiIncludedAttributes<R, G>, keyof R["$schema"]>
