@@ -405,6 +405,39 @@ describe("queryGsi", () => {
   });
 });
 
+describe("getGsi", () => {
+  test("returns the item when exactly one match exists", async () => {
+    const result = await userRepo.getGsi("byEmail", { email: "a@b.com" });
+    expect(result).toBeDefined();
+    expect(result!.email).toBe("a@b.com");
+  });
+
+  test("returns undefined when no match exists", async () => {
+    const result = await userRepo.getGsi("byEmail", { email: "nobody@example.com" });
+    expect(result).toBeUndefined();
+  });
+
+  test("throws DinahError DATA_INTEGRITY when more than one item is returned", async () => {
+    // byRole GSI: multiple users with role "admin" exist in the table by now
+    const err = await userRepo.getGsi("byRole", { role: "admin" }).catch((e) => e);
+    expect(err).toBeInstanceOf(DinahError);
+    expect(err.details.type).toBe("DATA_INTEGRITY");
+  });
+
+  test("getGsiOrThrow returns item when found", async () => {
+    const result = await userRepo.getGsiOrThrow("byEmail", { email: "a@b.com" });
+    expect(result.email).toBe("a@b.com");
+  });
+
+  test("getGsiOrThrow throws DinahError NOT_FOUND when no match", async () => {
+    const err = await userRepo
+      .getGsiOrThrow("byEmail", { email: "nobody@example.com" })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(DinahError);
+    expect(err.details.type).toBe("NOT_FOUND");
+  });
+});
+
 describe("queryPaged", () => {
   test("paginates through results", async () => {
     let pageCount = 0;

@@ -213,6 +213,26 @@ export type RepoQueryGsiPagedResult<
   G extends string = string,
 > = AsyncGenerator<ApplyGsiProjection<R, O, G>[]>;
 
+// get gsi -------------------------------------------------------------------------------------------
+
+export type RepoGetGsiOptions<
+  R extends RepoBase,
+  T extends Table = Table,
+  G extends string = string,
+> = Omit<RepoQueryGsiOptions<R, T, G>, "sort" | "limit" | "startKey">;
+
+export type RepoGetGsiResult<
+  R extends RepoBase,
+  O extends RepoGetGsiOptions<R>,
+  G extends string = string,
+> = ApplyGsiProjection<R, O, G> | undefined;
+
+export type RepoGetGsiOrThrowResult<
+  R extends RepoBase,
+  O extends RepoGetGsiOptions<R>,
+  G extends string = string,
+> = ApplyGsiProjection<R, O, G>;
+
 // scan ----------------------------------------------------------------------------------------------
 
 export interface RepoScanOptions<R extends RepoBase> {

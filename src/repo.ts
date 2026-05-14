@@ -15,6 +15,9 @@ import type {
   RepoDeleteOrThrowResult,
   RepoDeleteResult,
   RepoExistsOptions,
+  RepoGetGsiOptions,
+  RepoGetGsiOrThrowResult,
+  RepoGetGsiResult,
   RepoGetOptions,
   RepoGetOrThrowResult,
   RepoGetResult,
@@ -47,6 +50,7 @@ import type {
 } from "./repo.types";
 import type { Condition, ExtractTableDef, ExtractTableSchema, Obj } from "./types";
 import { isOperation } from "./expression-builder";
+import { DinahError } from "./error";
 
 // TODO: query/queryGsi needs strongly typed "key" argument
 // allows =,>,>=,<,<=,begins_with, between on sort key
@@ -314,6 +318,45 @@ export class Repo<
     } as any)) {
       yield this.applyTransformsIfNeeded(page, { ...options, gsi });
     }
+  }
+
+  async getGsi<G extends TableGsiNames<T>, O extends RepoGetGsiOptions<this, T, G>>(
+    gsi: G,
+    query: RepoQueryGsiQuery<T, G>,
+    options?: O,
+  ): Promise<RepoGetGsiResult<this, O, G>> {
+    const items = await this.db.query({
+      table: this.tableName,
+      index: gsi,
+      query,
+      ...options,
+    } as any);
+    if (items.length > 1) {
+      throw new DinahError({
+        type: "DATA_INTEGRITY",
+        message: `getGsi on "${gsi}" returned ${items.length} items; expected at most 1.`,
+      });
+    }
+    const item = items[0];
+    return (
+      item ? this.applyTransformIfNeeded(item, { ...options, gsi }) : undefined
+    ) as RepoGetGsiResult<this, O, G>;
+  }
+
+  async getGsiOrThrow<G extends TableGsiNames<T>, O extends RepoGetGsiOptions<this, T, G>>(
+    gsi: G,
+    query: RepoQueryGsiQuery<T, G>,
+    options?: O,
+  ): Promise<RepoGetGsiOrThrowResult<this, O, G>> {
+    const item = await this.getGsi(gsi, query, options);
+    if (item === undefined) {
+      throw new DinahError({
+        type: "NOT_FOUND",
+        key: query as Record<string, unknown>,
+        resource: this.resourceName,
+      });
+    }
+    return item as RepoGetGsiOrThrowResult<this, O, G>;
   }
 
   async scan<O extends RepoScanOptions<this>>(options?: O): Promise<RepoScanResult<this, O>> {

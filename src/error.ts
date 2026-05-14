@@ -2,7 +2,8 @@ export type DinahErrorDetails =
   | { type: "NOT_FOUND"; key: Record<string, unknown>; resource?: string }
   | { type: "CONDITIONAL_CHECK_FAILED"; key?: Record<string, unknown>; resource?: string }
   | { type: "VALIDATION"; message: string }
-  | { type: "TRANSACTION_CANCELED"; reasons: Array<{ type: string; message?: string }> };
+  | { type: "TRANSACTION_CANCELED"; reasons: Array<{ type: string; message?: string }> }
+  | { type: "DATA_INTEGRITY"; message: string };
 
 function dinahErrorMessage(details: DinahErrorDetails): string {
   switch (details.type) {
@@ -14,6 +15,8 @@ function dinahErrorMessage(details: DinahErrorDetails): string {
         : `${details.resource ?? "Item"} condition check failed`;
     case "VALIDATION":
       return `Validation error: ${details.message}`;
+    case "DATA_INTEGRITY":
+      return `Data integrity error: ${details.message}`;
     case "TRANSACTION_CANCELED":
       return `Transaction canceled: ${details.reasons.map((r) => r.type).join(", ")}`;
   }
