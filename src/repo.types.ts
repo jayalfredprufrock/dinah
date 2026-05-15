@@ -30,7 +30,11 @@ export type RepoUpdateItem<R extends RepoBase> = DistPartialSome<
   keyof R["defaultUpdateData"]
 >;
 
-export type GsiNames<R extends RepoBase> = keyof R["table"]["def"]["gsis"] & string;
+export type RepoUpdateInput<R extends RepoBase> = RepoUpdateData<
+  Omit<R["$schema"], R["$derivedAttributes"] | R["$immutableAttributes"]>
+>;
+
+export type GsiNames<R extends RepoBase> = keyof NonNullable<R["table"]["def"]["gsis"]> & string;
 
 export type TableGsiNames<T extends Table> = keyof NonNullable<ExtractTableDef<T>["gsis"]> & string;
 
@@ -44,7 +48,7 @@ export type Projection<R extends RepoBase> = AllKeys<R["$schema"]>[];
 export type RepoOutput<R extends RepoBase> = ReturnType<R["transformOutput"]>;
 
 export type ApplyProjection<R extends RepoBase, O> = O extends {
-  projection: Array<infer P extends AllKeys<R["$schema"]>>;
+  projection: ReadonlyArray<infer P extends AllKeys<R["$schema"]>>;
 }
   ? Pick<R["$schema"], P>
   : RepoOutput<R>;
@@ -75,7 +79,7 @@ type MakeRequired<T, K extends keyof any> = Omit<T, Extract<K, keyof T>> &
   Required<Pick<T, Extract<K, keyof T>>>;
 
 export type ApplyGsiProjection<R extends RepoBase, O, G extends string> = O extends {
-  projection: Array<infer P extends AllKeys<R["$schema"]>>;
+  projection: ReadonlyArray<infer P extends AllKeys<R["$schema"]>>;
 }
   ? Pick<R["$schema"], P | Extract<GsiAllKeyAttributes<R, G>, keyof R["$schema"]>>
   : GsiProjectionType<R, G> extends "ALL" | undefined
@@ -90,16 +94,17 @@ export type ApplyGsiProjection<R extends RepoBase, O, G extends string> = O exte
 export interface RepoGetOptions<R extends RepoBase> {
   consistent?: boolean;
   projection?: Projection<R>;
-  filter?: (item: R["$schema"]) => boolean;
+  filter?: Partial<R["$schema"]>;
 }
 
 export type RepoGetResult<R extends RepoBase, O extends RepoGetOptions<R>> =
-  | undefined
-  | ApplyProjection<R, O>;
-export type RepoGetOrThrowResult<R extends RepoBase, O extends RepoGetOptions<R>> = ApplyProjection<
-  R,
-  O
->;
+  | NarrowByDiscriminator<ApplyProjection<R, O>, R["$discriminator"], FilterOf<O>>
+  | undefined;
+
+export type RepoGetOrThrowResult<
+  R extends RepoBase,
+  O extends RepoGetOptions<R>,
+> = NarrowByDiscriminator<ApplyProjection<R, O>, R["$discriminator"], FilterOf<O>>;
 
 // put ------------------------------------------------------------------------------------------------
 
@@ -107,7 +112,11 @@ export interface RepoPutOptions<R extends RepoBase> {
   condition?: Condition<R["$schema"]>;
 }
 
-export type RepoPutResult<R extends RepoBase> = RepoOutput<R>;
+export type RepoPutResult<R extends RepoBase, TItem = {}> = NarrowByDiscriminator<
+  RepoOutput<R>,
+  R["$discriminator"],
+  TItem
+>;
 
 // create ---------------------------------------------------------------------------------------------
 
@@ -117,7 +126,11 @@ export interface RepoCreateOptions<R extends RepoBase> {
   condition?: Condition<R["$schema"]>;
 }
 
-export type RepoCreateResult<R extends RepoBase> = RepoOutput<R>;
+export type RepoCreateResult<R extends RepoBase, TItem = {}> = NarrowByDiscriminator<
+  RepoOutput<R>,
+  R["$discriminator"],
+  TItem
+>;
 
 // update ---------------------------------------------------------------------------------------------
 
@@ -155,15 +168,17 @@ export interface RepoQueryOptions<R extends RepoBase> {
   sort?: "ASC" | "DESC";
 }
 
-export type RepoQueryResult<R extends RepoBase, O extends RepoQueryOptions<R>> = ApplyProjection<
-  R,
-  O
->[];
+export type RepoQueryResult<
+  R extends RepoBase,
+  O extends RepoQueryOptions<R>,
+> = NarrowByDiscriminator<ApplyProjection<R, O>, R["$discriminator"], FilterOf<O>>[];
 
 export type RepoQueryPagedResult<
   R extends RepoBase,
   O extends RepoQueryOptions<R>,
-> = AsyncGenerator<ApplyProjection<R, O>[]>;
+> = AsyncGenerator<
+  NarrowByDiscriminator<ApplyProjection<R, O>, R["$discriminator"], FilterOf<O>>[]
+>;
 
 // query gsi -----------------------------------------------------------------------------------------
 
@@ -205,13 +220,15 @@ export type RepoQueryGsiResult<
   R extends RepoBase,
   O extends RepoQueryGsiOptions<R>,
   G extends string = string,
-> = ApplyGsiProjection<R, O, G>[];
+> = NarrowByDiscriminator<ApplyGsiProjection<R, O, G>, R["$discriminator"], FilterOf<O>>[];
 
 export type RepoQueryGsiPagedResult<
   R extends RepoBase,
   O extends RepoQueryGsiOptions<R>,
   G extends string = string,
-> = AsyncGenerator<ApplyGsiProjection<R, O, G>[]>;
+> = AsyncGenerator<
+  NarrowByDiscriminator<ApplyGsiProjection<R, O, G>, R["$discriminator"], FilterOf<O>>[]
+>;
 
 // get gsi -------------------------------------------------------------------------------------------
 
@@ -219,19 +236,23 @@ export type RepoGetGsiOptions<
   R extends RepoBase,
   T extends Table = Table,
   G extends string = string,
-> = Omit<RepoQueryGsiOptions<R, T, G>, "sort" | "limit" | "startKey">;
+> = Omit<RepoQueryGsiOptions<R, T, G>, "sort" | "limit" | "startKey" | "filter"> & {
+  filter?: Partial<R["$schema"]>;
+};
 
 export type RepoGetGsiResult<
   R extends RepoBase,
   O extends RepoGetGsiOptions<R>,
   G extends string = string,
-> = ApplyGsiProjection<R, O, G> | undefined;
+> =
+  | NarrowByDiscriminator<ApplyGsiProjection<R, O, G>, R["$discriminator"], FilterOf<O>>
+  | undefined;
 
 export type RepoGetGsiOrThrowResult<
   R extends RepoBase,
   O extends RepoGetGsiOptions<R>,
   G extends string = string,
-> = ApplyGsiProjection<R, O, G>;
+> = NarrowByDiscriminator<ApplyGsiProjection<R, O, G>, R["$discriminator"], FilterOf<O>>;
 
 // scan ----------------------------------------------------------------------------------------------
 
@@ -244,13 +265,13 @@ export interface RepoScanOptions<R extends RepoBase> {
   parallel?: number;
 }
 
-export type RepoScanResult<R extends RepoBase, O extends RepoScanOptions<R>> = ApplyProjection<
-  R,
-  O
->[];
+export type RepoScanResult<
+  R extends RepoBase,
+  O extends RepoScanOptions<R>,
+> = NarrowByDiscriminator<ApplyProjection<R, O>, R["$discriminator"], FilterOf<O>>[];
 
 export type RepoScanPagedResult<R extends RepoBase, O extends RepoScanOptions<R>> = AsyncGenerator<
-  ApplyProjection<R, O>[]
+  NarrowByDiscriminator<ApplyProjection<R, O>, R["$discriminator"], FilterOf<O>>[]
 >;
 
 // scan gsi ------------------------------------------------------------------------------------------
@@ -271,13 +292,15 @@ export type RepoScanGsiResult<
   R extends RepoBase,
   O extends RepoScanGsiOptions<R>,
   G extends string = string,
-> = ApplyGsiProjection<R, O, G>[];
+> = NarrowByDiscriminator<ApplyGsiProjection<R, O, G>, R["$discriminator"], FilterOf<O>>[];
 
 export type RepoScanGsiPagedResult<
   R extends RepoBase,
   O extends RepoScanGsiOptions<R>,
   G extends string = string,
-> = AsyncGenerator<ApplyGsiProjection<R, O, G>[]>;
+> = AsyncGenerator<
+  NarrowByDiscriminator<ApplyGsiProjection<R, O, G>, R["$discriminator"], FilterOf<O>>[]
+>;
 
 // exists -------------------------------------------------------------------------------------------
 
@@ -291,18 +314,18 @@ export interface RepoExistsOptions<R extends RepoBase> {
 
 export interface RepoTrxGetOptions<R extends RepoBase> {
   projection?: Projection<R>;
-  filter?: (item: R["$schema"]) => boolean;
+  filter?: Partial<R["$schema"]>;
 }
 
 export type RepoTrxGetResult<R extends RepoBase, O extends RepoTrxGetOptions<R>> = (
-  | ApplyProjection<R, O>
+  | NarrowByDiscriminator<ApplyProjection<R, O>, R["$discriminator"], FilterOf<O>>
   | undefined
 )[];
 
 export type RepoTrxGetOrThrowResult<
   R extends RepoBase,
   O extends RepoTrxGetOptions<R>,
-> = ApplyProjection<R, O>[];
+> = NarrowByDiscriminator<ApplyProjection<R, O>, R["$discriminator"], FilterOf<O>>[];
 
 export type RepoTrxGetRequestResult = { table: string };
 
@@ -345,18 +368,18 @@ export type RepoTrxWriteRequest<R extends RepoBase> =
 export interface RepoBatchGetOptions<R extends RepoBase> {
   consistent?: boolean;
   projection?: Projection<R>;
-  filter?: (item: R["$schema"]) => boolean;
+  filter?: Partial<R["$schema"]>;
 }
 
 export type RepoBatchGetResult<R extends RepoBase, O extends RepoBatchGetOptions<R>> = {
-  items: ApplyProjection<R, O>[];
+  items: NarrowByDiscriminator<ApplyProjection<R, O>, R["$discriminator"], FilterOf<O>>[];
   unprocessed?: RepoKey<R>[];
 };
 
 export type RepoBatchGetOrThrowResult<
   R extends RepoBase,
   O extends RepoBatchGetOptions<R>,
-> = ApplyProjection<R, O>[];
+> = NarrowByDiscriminator<ApplyProjection<R, O>, R["$discriminator"], FilterOf<O>>[];
 
 // batch write --------------------------------------------------------------------------------------
 
@@ -397,3 +420,25 @@ export type RepoBatchUpdateResult<R extends RepoBase> = {
 
 export type RepoBatchDeleteRequest<R extends RepoBase> = RepoKey<R>[];
 export type RepoBatchDeleteResponse<R extends RepoBase> = RepoBatchDeleteRequest<R> | undefined;
+
+// discriminator narrowing -----------------------------------------------------------------------
+
+type ExtractDiscriminatorValue<Q, D extends keyof any> = D extends keyof Q
+  ? Q[D] extends string | number | boolean
+    ? Q[D]
+    : never
+  : never;
+
+// Extracts the filter object from options (non-function, non-undefined only)
+export type FilterOf<O> = O extends { filter: infer F } ? (F extends object ? F : {}) : {};
+
+export type NarrowByDiscriminator<TOutput, TDiscriminator extends keyof any, Q> = [
+  TDiscriminator,
+] extends [never]
+  ? TOutput
+  : [ExtractDiscriminatorValue<Q, TDiscriminator>] extends [never]
+    ? TOutput
+    : Extract<
+        TOutput,
+        { [K in TDiscriminator & keyof TOutput]: ExtractDiscriminatorValue<Q, TDiscriminator> }
+      >;

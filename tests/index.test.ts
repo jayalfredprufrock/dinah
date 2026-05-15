@@ -98,13 +98,10 @@ describe("put and get", () => {
   });
 
   test("get with filter filters result", async () => {
-    const match = await userRepo.get({ userId: "u1" }, { filter: (item) => item.role === "admin" });
+    const match = await userRepo.get({ userId: "u1" }, { filter: { role: "admin" } });
     expect(match).toBeDefined();
 
-    const noMatch = await userRepo.get(
-      { userId: "u1" },
-      { filter: (item) => item.role === "viewer" },
-    );
+    const noMatch = await userRepo.get({ userId: "u1" }, { filter: { role: "viewer" } });
     expect(noMatch).toBeUndefined();
   });
 });

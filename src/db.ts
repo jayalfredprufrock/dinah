@@ -40,7 +40,7 @@ import type {
   DbUpdate,
 } from "./db.types";
 import type { ExtractTableSchema, Obj } from "./types";
-import { extractTableDesc, removeUndefined } from "./util";
+import { extractTableDesc, matchesPartial, removeUndefined } from "./util";
 
 // TODO
 // - caching support?
@@ -88,6 +88,7 @@ export class Db {
     TOutput = ExtractTableSchema<T>,
     const TDerived extends keyof ExtractTableSchema<T> = never,
     const TImmutable extends keyof ExtractTableSchema<T> = never,
+    const TDiscriminator extends keyof ExtractTableSchema<T> = never,
   >(
     table: T,
     config?: RepoConfig<
@@ -96,9 +97,10 @@ export class Db {
       TUpdateDefaults,
       TOutput,
       TDerived,
-      TImmutable
+      TImmutable,
+      TDiscriminator
     >,
-  ): Repo<T, TDefaults, TUpdateDefaults, TOutput, TDerived, TImmutable> {
+  ): Repo<T, TDefaults, TUpdateDefaults, TOutput, TDerived, TImmutable, TDiscriminator> {
     return new Repo(this, table, config);
   }
 
@@ -140,7 +142,7 @@ export class Db {
 
     const output = await this.client.send(input);
 
-    if (output.Item && data.filter && !data.filter(output.Item as T)) {
+    if (output.Item && data.filter && !matchesPartial(data.filter as any, output.Item as any)) {
       return undefined;
     }
 
@@ -446,7 +448,7 @@ export class Db {
         if (!result.items[table]) continue;
 
         const filteredItems = tableData[table]?.filter
-          ? items.filter(tableData[table].filter)
+          ? items.filter((item) => matchesPartial(tableData[table]!.filter as any, item as any))
           : items;
 
         result.items[table].push(...filteredItems);
@@ -691,7 +693,9 @@ export class Db {
 
         if (!requests[i]?.filter) return response.Item;
 
-        return requests[i].filter(response.Item) ? response.Item : undefined;
+        return matchesPartial(requests[i].filter!, response.Item as any)
+          ? response.Item
+          : undefined;
       }) as DbTrxGetResult<R>) ?? []
     );
   }

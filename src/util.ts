@@ -99,6 +99,9 @@ export const extractTableDesc = (table: Table): CreateTableCommandInput => {
   };
 };
 
+export const matchesPartial = <T extends object>(partial: Partial<T>, item: T): boolean =>
+  (Object.entries(partial) as [keyof T, unknown][]).every(([k, v]) => item[k] === v);
+
 export const chunk = <T = unknown>(arr: T[], chunkSize: number): T[][] => {
   if (chunkSize <= 0) return [];
 

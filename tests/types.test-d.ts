@@ -761,7 +761,7 @@ describe("sort key operator typing — multi-key sort key", () => {
     void mkRepo.queryGsi("byTenantRegion", {
       tenantId: "t1",
       region: "us",
-      // @ts-expect-error — $ne not valid on sort key
+      // @ts-expect-error — $ne is not valid in KeyConditionExpression
       round: { $ne: "FINAL" },
     });
   });
