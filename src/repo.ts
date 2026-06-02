@@ -73,16 +73,41 @@ export interface RepoBase {
   transformOutput(item: never): unknown;
 }
 
-export type ComputedFieldDef<TSchema extends object, K extends keyof TSchema> = {
-  [J in keyof TSchema]: { from: J; compute: (val: TSchema[J]) => TSchema[K] };
-}[keyof TSchema];
+export type ComputedFieldDef<TSchema extends object, K extends keyof TSchema> =
+  | { [J in keyof TSchema]: { from: J; compute: (val: TSchema[J]) => TSchema[K] } }[keyof TSchema]
+  | { from: readonly (keyof TSchema)[]; compute: (...vals: any[]) => TSchema[K] };
+
+// Recursively maps a tuple of schema keys to a tuple of their value types.
+type ComputeArgs<
+  TSchema extends object,
+  Js extends readonly (keyof TSchema)[],
+> = Js extends readonly [
+  infer Head extends keyof TSchema,
+  ...infer Tail extends readonly (keyof TSchema)[],
+]
+  ? [TSchema[Head], ...ComputeArgs<TSchema, Tail>]
+  : [];
+
+// Post-inference constraint. Maps each computed attribute key to its expected shape so
+// TypeScript's structural assignability check enforces correct param and return types.
+// Catching too-narrow param annotations (missing | undefined) and too-broad return types
+// falls out of normal contravariant/covariant function subtype checking automatically.
+export type ValidComputedMap<TSchema extends object, TComputed> = {
+  [K in keyof TComputed]?: K extends keyof TSchema
+    ? TComputed[K] extends { from: infer Js extends readonly (keyof TSchema)[]; compute: any }
+      ? { from: Js; compute: (...vals: ComputeArgs<TSchema, Js>) => TSchema[K] }
+      : TComputed[K] extends { from: infer J extends keyof TSchema; compute: any }
+        ? { from: J; compute: (val: TSchema[J]) => TSchema[K] }
+        : never
+    : never;
+};
 
 export interface RepoConfig<
   TSchema extends object,
   TDefaults extends Partial<TSchema> = {},
   TUpdateDefaults extends Partial<TSchema> = {},
   TOutput = TSchema,
-  TComputed extends { [K in keyof TSchema]?: ComputedFieldDef<TSchema, K> } = {},
+  TComputed extends ValidComputedMap<TSchema, TComputed> = {},
   TImmutable extends AllKeys<TSchema> = never,
   TDiscriminator extends keyof TSchema = never,
 > {
@@ -101,9 +126,7 @@ export class Repo<
   TDefaults extends Partial<ExtractTableSchema<T>> = {},
   TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
   TOutput = ExtractTableSchema<T>,
-  TComputed extends {
-    [K in keyof ExtractTableSchema<T>]?: ComputedFieldDef<ExtractTableSchema<T>, K>;
-  } = {},
+  TComputed extends ValidComputedMap<ExtractTableSchema<T>, TComputed> = {},
   TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
   TDiscriminator extends keyof ExtractTableSchema<T> = never,
 > {
@@ -694,8 +717,14 @@ export class Repo<
 
     if (computedAttributes) {
       for (const [key, def] of Object.entries(computedAttributes)) {
-        const { from, compute } = def as { from: string; compute: (v: unknown) => unknown };
-        const computed = compute(merged[from]);
+        const { from, compute } = def as {
+          from: string | readonly string[];
+          compute: (...v: unknown[]) => unknown;
+        };
+        const args = Array.isArray(from)
+          ? (from as string[]).map((k) => merged[k])
+          : [merged[from as string]];
+        const computed = compute(...args);
         if (computed !== undefined) {
           merged[key] = computed;
         } else {
@@ -757,21 +786,60 @@ export class Repo<
 
     if (computedAttributes) {
       for (const [computedKey, def] of Object.entries(computedAttributes)) {
-        const { from, compute } = def as { from: string; compute: (v: unknown) => unknown };
-        if (!(from in result)) continue;
+        const { from, compute } = def as {
+          from: string | readonly string[];
+          compute: (...v: unknown[]) => unknown;
+        };
 
-        const val = result[from];
-        if (val === undefined || (isOperation(val) && val.$remove === true)) {
-          result[computedKey] = undefined;
-        } else if (!isOperation(val)) {
-          result[computedKey] = compute(val);
-        } else if (val.$set !== undefined) {
-          result[computedKey] = compute(val.$set);
+        if (Array.isArray(from)) {
+          const fromArr = from as string[];
+          const presentKeys = fromArr.filter((k) => k in result);
+          if (presentKeys.length === 0) continue;
+          const missingKeys = fromArr.filter((k) => !(k in result));
+          if (missingKeys.length > 0) {
+            throw new DinahError({
+              type: "VALIDATION",
+              message: `Field "${computedKey}" is computed from [${fromArr.join(", ")}]. All source fields must be included in the update or none. Missing: [${missingKeys.join(", ")}].`,
+            });
+          }
+          const args: unknown[] = [];
+          for (const key of fromArr) {
+            const val = result[key];
+            if (val === undefined || (isOperation(val) && val.$remove === true)) {
+              args.push(undefined);
+            } else if (!isOperation(val)) {
+              args.push(val);
+            } else if (val.$set !== undefined) {
+              args.push(val.$set);
+            } else {
+              throw new DinahError({
+                type: "VALIDATION",
+                message: `Field "${key}" drives computed field "${computedKey}" and cannot use arithmetic or list operators in updates.`,
+              });
+            }
+          }
+          const computed = compute(...args);
+          result[computedKey] = computed !== undefined ? computed : { $remove: true };
         } else {
-          throw new DinahError({
-            type: "VALIDATION",
-            message: `Field "${from}" drives computed field "${computedKey}" and cannot use arithmetic or list operators in updates.`,
-          });
+          const fromKey = from as string;
+          if (!(fromKey in result)) continue;
+
+          const val = result[fromKey];
+          let resolvedVal: unknown;
+          if (val === undefined || (isOperation(val) && val.$remove === true)) {
+            resolvedVal = undefined;
+          } else if (!isOperation(val)) {
+            resolvedVal = val;
+          } else if (val.$set !== undefined) {
+            resolvedVal = val.$set;
+          } else {
+            throw new DinahError({
+              type: "VALIDATION",
+              message: `Field "${fromKey}" drives computed field "${computedKey}" and cannot use arithmetic or list operators in updates.`,
+            });
+          }
+          const computed = compute(resolvedVal);
+          result[computedKey] = computed !== undefined ? computed : { $remove: true };
         }
       }
     }
@@ -822,9 +890,7 @@ export interface MakeRepoResult<
   TDefaults extends Partial<ExtractTableSchema<T>> = {},
   TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
   TOutput = ExtractTableSchema<T>,
-  TComputed extends {
-    [K in keyof ExtractTableSchema<T>]?: ComputedFieldDef<ExtractTableSchema<T>, K>;
-  } = {},
+  TComputed extends ValidComputedMap<ExtractTableSchema<T>, TComputed> = {},
   TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
   TDiscriminator extends keyof ExtractTableSchema<T> = never,
 > {
@@ -837,9 +903,7 @@ export const makeRepo = <
   TDefaults extends Partial<ExtractTableSchema<T>> = {},
   TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
   TOutput = ExtractTableSchema<T>,
-  const TComputed extends {
-    [K in keyof ExtractTableSchema<T>]?: ComputedFieldDef<ExtractTableSchema<T>, K>;
-  } = {},
+  const TComputed extends ValidComputedMap<ExtractTableSchema<T>, TComputed> = {},
   const TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
   const TDiscriminator extends keyof ExtractTableSchema<T> = never,
 >(

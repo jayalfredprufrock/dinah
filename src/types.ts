@@ -215,20 +215,20 @@ interface UpdateListOps<E> {
 
 interface UpdateCommonOps<V> {
   $set?: V;
-  $remove?: true;
   $ifNotExists?: V | [string, V];
   $setAdd?: V | V[];
   $setDel?: V | V[];
 }
 
-type UpdateFieldOps<V> = [NonNullable<V>] extends [number]
+type UpdateFieldOps<V> = ([NonNullable<V>] extends [number]
   ? UpdateCommonOps<V> & UpdateNumberOps
   : [NonNullable<V>] extends [(infer E)[]]
     ? UpdateCommonOps<V> & UpdateListOps<E>
-    : UpdateCommonOps<V>;
+    : UpdateCommonOps<V>) &
+  ([undefined] extends [V] ? { $remove?: true } : {});
 
 export type UpdateExpression<T> = {
-  [K in AllKeys<T>]?: ValueOfUnion<T, K> | UpdateFieldOps<ValueOfUnion<T, K>> | undefined;
+  [K in AllKeys<T>]?: ValueOfUnion<T, K> | UpdateFieldOps<ValueOfUnion<T, K>>;
 };
 
 //-----------------------------------------------------------------------------------------------------

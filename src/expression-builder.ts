@@ -1,3 +1,4 @@
+import { DinahError } from "./error";
 import type { Obj } from "./types";
 
 const attrTypes = ["S", "SS", "N", "NS", "B", "BS", "BOOL", "NULL", "L", "M"] as const;
@@ -120,7 +121,10 @@ export class ExpressionBuilder {
       const placeholder = this.getPathSub(path);
 
       if (valOrOperation === undefined) {
-        removeOperations.push(placeholder);
+        throw new DinahError({
+          type: "VALIDATION",
+          message: `Field "${path}" cannot be set to undefined in an update expression. Use { $remove: true } to remove an optional attribute.`,
+        });
       } else if (isOperation(valOrOperation)) {
         if (valOrOperation.$remove === true) {
           removeOperations.push(placeholder);
@@ -288,7 +292,10 @@ export class ExpressionBuilder {
 
     for (const [path, valOrOp] of Object.entries(expression)) {
       if (valOrOp === undefined) {
-        removes.push(`"${path}"`);
+        throw new DinahError({
+          type: "VALIDATION",
+          message: `Field "${path}" cannot be set to undefined in an update expression. Use { $remove: true } to remove an optional attribute.`,
+        });
       } else if (isOperation(valOrOp)) {
         if (valOrOp.$remove === true) {
           removes.push(`"${path}"`);

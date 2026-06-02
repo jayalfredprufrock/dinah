@@ -1,7 +1,6 @@
 {
   "$schema": "https://www.schemastore.org/tsconfig",
   "_version": "24.0.0",
-
   "compilerOptions": {
     "lib": [
       "es2024",
@@ -15,7 +14,6 @@
     "moduleResolution": "bundler",
     "target": "es2024",
     "strict": true,
-
     "resolveJsonModule": true,
     "types": ["node"],
     "declaration": true,
@@ -25,7 +23,6 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-
     "noUnusedLocals": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
@@ -33,6 +30,5 @@
     "allowUnreachableCode": false,
     "useDefineForClassFields": true
   },
-
   "exclude": ["docs"]
 }

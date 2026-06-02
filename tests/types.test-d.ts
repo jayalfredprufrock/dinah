@@ -1080,12 +1080,13 @@ describe("update expression typing — valid expressions", () => {
     await condRepo.update({ userId: "u1" }, { name: { $set: "Bob" } });
   });
 
-  test("$remove", async () => {
+  test("$remove on required field is disallowed", async () => {
+    // @ts-expect-error — age is required, $remove is not valid
     await condRepo.update({ userId: "u1" }, { age: { $remove: true } });
   });
 
-  test("undefined removes attribute", async () => {
-    await condRepo.update({ userId: "u1" }, { age: undefined });
+  test("$remove on optional field is allowed", async () => {
+    await condRepo.update({ userId: "u1" }, { score: { $remove: true } });
   });
 
   test("$ifNotExists with value", async () => {
@@ -1402,10 +1403,82 @@ describe("transformAttributes and computedAttributes types", () => {
   test("computedAttributes rejects invalid from field", () => {
     db.makeRepo(TransformTable, {
       computedAttributes: {
+        // @ts-expect-error — "nope" is not a valid schema field, whole entry evaluates to never
         ttl: {
-          // @ts-expect-error — "nope" is not a valid schema field
           from: "nope",
           compute: (v: number | undefined) => v,
+        },
+      },
+    });
+  });
+
+  test("array from: compute receives correct positional types", () => {
+    db.makeRepo(TransformTable, {
+      computedAttributes: {
+        orgId: {
+          from: ["expiresAt", "user"],
+          compute: (exp: number | undefined, u: { orgId: string } | undefined) => u?.orgId,
+        },
+      },
+    });
+  });
+
+  test("array from: rejects wrong positional annotation", () => {
+    db.makeRepo(TransformTable, {
+      computedAttributes: {
+        orgId: {
+          from: ["expiresAt", "user"],
+          // @ts-expect-error — first param should be number | undefined, not string
+          compute: (exp: string, u: { orgId: string } | undefined) => u?.orgId,
+        },
+      },
+    });
+  });
+
+  test("array from: rejects annotation missing | undefined for optional field", () => {
+    db.makeRepo(TransformTable, {
+      computedAttributes: {
+        orgId: {
+          from: ["expiresAt", "user"],
+          // @ts-expect-error — expiresAt is number | undefined, not number
+          compute: (exp: number, u: { orgId: string } | undefined) => u?.orgId,
+        },
+      },
+    });
+  });
+
+  test("array from: rejects too-broad return type", () => {
+    db.makeRepo(TransformTable, {
+      computedAttributes: {
+        orgId: {
+          from: ["expiresAt", "user"],
+          // @ts-expect-error — returns string | number but orgId is string | undefined
+          compute: (exp: number | undefined, u: { orgId: string } | undefined): string | number =>
+            u?.orgId ?? 0,
+        },
+      },
+    });
+  });
+
+  test("single-key from: rejects too-broad return type", () => {
+    db.makeRepo(TransformTable, {
+      computedAttributes: {
+        ttl: {
+          from: "expiresAt",
+          // @ts-expect-error — returns string but ttl is number | undefined
+          compute: (v: number | undefined): string => String(v),
+        },
+      },
+    });
+  });
+
+  test("array from: rejects invalid from key", () => {
+    db.makeRepo(TransformTable, {
+      computedAttributes: {
+        // @ts-expect-error — "nope" is not a valid schema field
+        orgId: {
+          from: ["expiresAt", "nope"],
+          compute: (a: number | undefined, b: unknown) => String(b),
         },
       },
     });

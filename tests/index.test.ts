@@ -181,7 +181,7 @@ describe("update", () => {
     let result = await userRepo.get({ userId: "u1" });
     expect(result!.age).toBe(30);
 
-    await userRepo.update({ userId: "u1" }, { age: undefined });
+    await userRepo.update({ userId: "u1" }, { age: { $remove: true } });
     result = await userRepo.get({ userId: "u1" });
     expect(result!.age).toBeUndefined();
   });
@@ -194,7 +194,7 @@ describe("update", () => {
   });
 
   test("update with $ifNotExists sets default only when missing", async () => {
-    await userRepo.update({ userId: "u1" }, { age: undefined }); // remove first
+    await userRepo.update({ userId: "u1" }, { age: { $remove: true } }); // remove first
     await userRepo.update({ userId: "u1" }, { age: { $ifNotExists: 42 } });
     let result = await userRepo.get({ userId: "u1" });
     expect(result!.age).toBe(42);
@@ -216,6 +216,47 @@ describe("update", () => {
     await userRepo.update({ userId: "u1" }, { tags: { $prepend: "z" } });
     const result = await userRepo.get({ userId: "u1" });
     expect(result!.tags).toEqual(["z", "a", "b"]);
+  });
+});
+
+describe("updateUndefinedBehavior", () => {
+  const throwDb = createDb();
+  const stripDb = createDb({ updateUndefinedBehavior: "strip" });
+  const removeDb = createDb({ updateUndefinedBehavior: "$remove" });
+  const throwRepo = throwDb.makeRepo(UserTable);
+  const stripRepo = stripDb.makeRepo(UserTable);
+  const removeRepo = removeDb.makeRepo(UserTable);
+
+  beforeAll(async () => {
+    await throwRepo.put({
+      userId: "undef-u1",
+      name: "Test",
+      email: "t@t.com",
+      role: "user",
+      tags: [],
+    });
+  });
+
+  test("throw (default): undefined in update throws DinahError", async () => {
+    const err = await throwRepo.update({ userId: "undef-u1" }, { age: undefined }).catch((e) => e);
+    expect(err).toBeInstanceOf(DinahError);
+    expect(err.details.type).toBe("VALIDATION");
+  });
+
+  test("strip: undefined fields are dropped, item unchanged for those fields", async () => {
+    await throwRepo.update({ userId: "undef-u1" }, { age: 42 });
+    await stripRepo.update({ userId: "undef-u1" }, { age: undefined, name: "Stripped" });
+    const result = await stripRepo.get({ userId: "undef-u1" });
+    expect(result!.name).toBe("Stripped");
+    expect(result!.age).toBe(42); // unchanged — not removed
+  });
+
+  test("$remove: undefined fields are removed from the item", async () => {
+    await throwRepo.update({ userId: "undef-u1" }, { age: 42 });
+    await removeRepo.update({ userId: "undef-u1" }, { age: undefined, name: "Removed" });
+    const result = await removeRepo.get({ userId: "undef-u1" });
+    expect(result!.name).toBe("Removed");
+    expect(result!.age).toBeUndefined(); // removed
   });
 });
 
@@ -907,7 +948,7 @@ describe("computedAttributes", () => {
   });
 
   test("update cascades removal when source is removed", async () => {
-    await transformRepo.update({ id: "cf-1" }, { expiresAt: undefined });
+    await transformRepo.update({ id: "cf-1" }, { expiresAt: { $remove: true } });
     const result = await transformRepo.get({ id: "cf-1" });
     expect(result!.expiresAt).toBeUndefined();
     expect(result!.ttl).toBeUndefined();

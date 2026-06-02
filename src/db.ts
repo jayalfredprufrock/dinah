@@ -16,7 +16,7 @@ import { DinahError } from "./error";
 import type { TransactGetCommandInput, TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
 import * as Lib from "@aws-sdk/lib-dynamodb";
 import { ExpressionBuilder } from "./expression-builder";
-import { Repo, type ComputedFieldDef, type RepoConfig } from "./repo";
+import { Repo, type RepoConfig, type ValidComputedMap } from "./repo";
 import type { Table } from "./table";
 import type {
   DbBatchGet,
@@ -72,7 +72,7 @@ export class Db {
       // here so consumers don't have to worry about that quirk
       this.client = Lib.DynamoDBDocumentClient.from(
         new DynamoDBClient({
-          endpoint: endpoint || undefined,
+          ...(endpoint ? { endpoint } : {}),
           ...clientConfig,
         }),
       );
@@ -81,14 +81,22 @@ export class Db {
     this.config = dbConfig;
   }
 
+  private normalizeUpdate(expression: Obj): Obj {
+    const behavior = this.config?.updateUndefinedBehavior ?? "throw";
+    if (behavior === "throw") return expression;
+    const entries = Object.entries(expression);
+    if (behavior === "strip") return Object.fromEntries(entries.filter(([, v]) => v !== undefined));
+    return Object.fromEntries(
+      entries.map(([k, v]) => [k, v === undefined ? { $remove: true } : v]),
+    );
+  }
+
   makeRepo<
     T extends Table,
     TDefaults extends Partial<ExtractTableSchema<T>> = {},
     TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
     TOutput = ExtractTableSchema<T>,
-    const TComputed extends {
-      [K in keyof ExtractTableSchema<T>]?: ComputedFieldDef<ExtractTableSchema<T>, K>;
-    } = {},
+    const TComputed extends ValidComputedMap<ExtractTableSchema<T>, TComputed> = {},
     const TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
     const TDiscriminator extends keyof ExtractTableSchema<T> = never,
   >(
@@ -210,7 +218,7 @@ export class Db {
       Key: data.key,
       ReturnValues: "ALL_NEW",
       ReturnValuesOnConditionCheckFailure: "ALL_OLD",
-      UpdateExpression: exp.update(data.update as Obj),
+      UpdateExpression: exp.update(this.normalizeUpdate(data.update as Obj)),
       ConditionExpression: exp.condition(condition),
       ExpressionAttributeNames: exp.attributeNames,
       ExpressionAttributeValues: exp.attributeValues,
@@ -620,7 +628,7 @@ export class Db {
 
       const statements = batch.map(([table, key, update]) => {
         const exp = new ExpressionBuilder();
-        const { sets, removes, params } = exp.partiqlUpdate(update);
+        const { sets, removes, params } = exp.partiqlUpdate(this.normalizeUpdate(update));
 
         const whereParts: string[] = [];
         for (const [field, value] of Object.entries(key)) {
@@ -751,7 +759,7 @@ export class Db {
         Update: {
           Key: request.key,
           TableName: request.table,
-          UpdateExpression: exp.update(request.update as Obj),
+          UpdateExpression: exp.update(this.normalizeUpdate(request.update as Obj)),
           ConditionExpression: exp.condition(request.condition),
           ExpressionAttributeNames: exp.attributeNames,
           ExpressionAttributeValues: exp.attributeValues,

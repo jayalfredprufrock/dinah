@@ -2,6 +2,7 @@ import type { AllKeys, Condition, KeyCondition, Obj, UpdateExpression } from "./
 
 export interface DbConfig {
   tableNamePrefix?: string;
+  updateUndefinedBehavior?: "throw" | "strip" | "$remove";
 }
 
 export interface DbListTables {

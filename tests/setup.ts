@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { Db, Table, makeRepo } from "../src";
+import { Db, Table, makeRepo, type DbConfig } from "../src";
 
 const DYNAMODB_ENDPOINT = process.env.DYNAMODB_ENDPOINT ?? "http://localhost:8000";
 
@@ -80,12 +80,15 @@ export const TransformTable = new Table(TransformSchema, {
 
 export const ALL_TABLES = [UserTable, PostTable, AuditTable, TransformTable];
 
-export function createDb(): Db {
-  return new Db({
-    region: "us-east-1",
-    endpoint: DYNAMODB_ENDPOINT,
-    credentials: { accessKeyId: "test", secretAccessKey: "test" },
-  });
+export function createDb(config?: DbConfig): Db {
+  return new Db(
+    {
+      region: "us-east-1",
+      endpoint: DYNAMODB_ENDPOINT,
+      credentials: { accessKeyId: "test", secretAccessKey: "test" },
+    },
+    config,
+  );
 }
 
 export async function createTables(db: Db): Promise<void> {
