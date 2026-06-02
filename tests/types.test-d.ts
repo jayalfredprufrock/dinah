@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import { describe, expectTypeOf, test } from "vite-plus/test";
 import { makeRepo, Db, Table } from "../src";
 import type { Condition, SortKeyOps } from "../src/types";
-import type { RepoGsiStartKey, RepoQueryGsiQuery } from "../src/repo.types";
+import type { RepoGsiStartKey, RepoQueryGsiQuery, RepoUpdateInputFor } from "../src/repo.types";
 
 const Schema = Type.Object({
   pk: Type.String(),
@@ -1143,5 +1143,257 @@ describe("update expression typing — invalid expressions", () => {
   test("rejects $prepend on number", async () => {
     // @ts-expect-error — $prepend is only for arrays
     await condRepo.update({ userId: "u1" }, { age: { $prepend: 5 } });
+  });
+});
+
+// ── Discriminator-narrowed update ─────────────────────────────────────────────
+
+const AnimalSchema = Type.Union([
+  Type.Object({
+    id: Type.String(),
+    kind: Type.Literal("cat"),
+    name: Type.String(),
+    meow: Type.String(),
+  }),
+  Type.Object({
+    id: Type.String(),
+    kind: Type.Literal("dog"),
+    name: Type.String(),
+    bark: Type.Number(),
+  }),
+]);
+const AnimalTable = new Table(AnimalSchema, {
+  name: "animals",
+  partitionKey: "id",
+});
+const animalRepo = db.makeRepo(AnimalTable, { discriminator: "kind" });
+
+describe("discriminator-narrowed update", () => {
+  test("update with discriminator literal allows variant-specific fields", async () => {
+    await animalRepo.update({ id: "a1", kind: "cat" }, { meow: "loud" });
+    await animalRepo.update({ id: "a1", kind: "dog" }, { bark: 11 });
+  });
+
+  test("update with full fetched object narrows by discriminator", async () => {
+    const animal = await animalRepo.getOrThrow({ id: "a1" });
+    if (animal.kind === "cat") {
+      await animalRepo.update(animal, { meow: "louder" });
+    }
+  });
+
+  test("update rejects variant-specific field with wrong discriminator", async () => {
+    // @ts-expect-error — "meow" is not on the dog variant
+    await animalRepo.update({ id: "a1", kind: "dog" }, { meow: "loud" });
+    // @ts-expect-error — "bark" is not on the cat variant
+    await animalRepo.update({ id: "a1", kind: "cat" }, { bark: 1 });
+  });
+
+  test("update without discriminator restricts to shared fields", async () => {
+    await animalRepo.update({ id: "a1" }, { name: "Whiskers" });
+    // @ts-expect-error — "meow" exists only on cat; key carries no discriminator
+    await animalRepo.update({ id: "a1" }, { meow: "loud" });
+    // @ts-expect-error — "bark" exists only on dog; key carries no discriminator
+    await animalRepo.update({ id: "a1" }, { bark: 1 });
+  });
+
+  test("repo without configured discriminator is unaffected", async () => {
+    const plainRepo = db.makeRepo(AnimalTable);
+    // Even with kind on the key, no narrowing happens because no discriminator
+    // was configured — fallback is shared keys only.
+    await plainRepo.update({ id: "a1", kind: "cat" }, { name: "Whiskers" });
+    // @ts-expect-error — "meow" is variant-specific and no discriminator config
+    await plainRepo.update({ id: "a1", kind: "cat" }, { meow: "loud" });
+  });
+
+  test("RepoUpdateInputFor selects the matching variant", () => {
+    type R = typeof animalRepo;
+    type CatInput = RepoUpdateInputFor<R, { id: string; kind: "cat" }>;
+    expectTypeOf<CatInput>().toMatchTypeOf<{ meow?: string | object }>();
+    type DogInput = RepoUpdateInputFor<R, { id: string; kind: "dog" }>;
+    expectTypeOf<DogInput>().toMatchTypeOf<{ bark?: number | object }>();
+  });
+
+  test("trxUpdateRequest narrows the same way as update", () => {
+    void animalRepo.trxUpdateRequest({ id: "a1", kind: "cat" }, { meow: "loud" });
+    // @ts-expect-error — "bark" is not on the cat variant
+    void animalRepo.trxUpdateRequest({ id: "a1", kind: "cat" }, { bark: 1 });
+  });
+});
+
+// ── immutableAttributes across a union ────────────────────────────────────────
+
+describe("immutableAttributes accepts variant-specific keys", () => {
+  test("variant-specific immutable attribute is allowed", () => {
+    // The constraint is AllKeys<TSchema>, so "meow" (cat-only) is accepted.
+    void db.makeRepo(AnimalTable, { discriminator: "kind", immutableAttributes: ["meow"] });
+  });
+
+  test("immutable variant-specific attribute is stripped from narrowed update", async () => {
+    const immRepo = db.makeRepo(AnimalTable, {
+      discriminator: "kind",
+      immutableAttributes: ["meow"],
+    });
+    // When narrowed to cat via discriminator, meow is immutable → rejected.
+    // @ts-expect-error — meow is declared immutable for the cat variant
+    await immRepo.update({ id: "a1", kind: "cat" }, { meow: "loud" });
+    // Non-immutable variant fields remain writable.
+    await immRepo.update({ id: "a1", kind: "dog" }, { bark: 1 });
+  });
+
+  test("rejects keys that don't exist on any variant", () => {
+    void db.makeRepo(AnimalTable, {
+      discriminator: "kind",
+      // @ts-expect-error — "nope" is not a key on any variant
+      immutableAttributes: ["nope"],
+    });
+  });
+});
+
+// ── GSI queries preserve discriminated union variants ─────────────────────────
+
+const ZooSchema = Type.Union([
+  Type.Object({
+    id: Type.String(),
+    kind: Type.Literal("cat"),
+    name: Type.String(),
+    meow: Type.String(),
+  }),
+  Type.Object({
+    id: Type.String(),
+    kind: Type.Literal("dog"),
+    name: Type.String(),
+    bark: Type.Number(),
+  }),
+]);
+const ZooTable = new Table(ZooSchema, {
+  name: "zoo",
+  partitionKey: "id",
+  gsis: {
+    byKind: { partitionKey: "kind" },
+  },
+});
+type ZooCat = { id: string; kind: "cat"; name: string; meow: string };
+type ZooDog = { id: string; kind: "dog"; name: string; bark: number };
+// GSI projections promote the GSI key via MakeRequired, which produces
+// `Omit<V, "kind"> & Required<Pick<V, "kind">>` per-variant. Structurally this
+// equals V, but expectTypeOf's strict equality cares about the form.
+type ZooCatGsi = Omit<ZooCat, "kind"> & Required<Pick<ZooCat, "kind">>;
+type ZooDogGsi = Omit<ZooDog, "kind"> & Required<Pick<ZooDog, "kind">>;
+const zooRepo = db.makeRepo(ZooTable, { discriminator: "kind" });
+
+describe("GSI queries preserve union variants", () => {
+  test("queryGsi returns the full union, not a collapsed shape", async () => {
+    const result = await zooRepo.queryGsi("byKind", { kind: "cat" });
+    expectTypeOf(result).toEqualTypeOf<(ZooCatGsi | ZooDogGsi)[]>();
+  });
+
+  test("queryGsi narrows by filter when the filter carries the discriminator", async () => {
+    const result = await zooRepo.queryGsi("byKind", { kind: "cat" }, { filter: { kind: "cat" } });
+    expectTypeOf(result).toEqualTypeOf<ZooCatGsi[]>();
+  });
+
+  test("scanGsi preserves union variants too", async () => {
+    const result = await zooRepo.scanGsi("byKind");
+    expectTypeOf(result).toEqualTypeOf<(ZooCatGsi | ZooDogGsi)[]>();
+  });
+
+  test("regular scan (no GSI) returns the raw union", async () => {
+    const result = await zooRepo.scan();
+    expectTypeOf(result).toEqualTypeOf<(ZooCat | ZooDog)[]>();
+  });
+});
+
+// ── transformAttributes and computedAttributes ───────────────────────────────────────
+
+const TransformSchema = Type.Object({
+  id: Type.String(),
+  email: Type.String(),
+  expiresAt: Type.Optional(Type.Number()),
+  ttl: Type.Optional(Type.Number()),
+  orgId: Type.Optional(Type.String()),
+  user: Type.Optional(Type.Object({ orgId: Type.String() })),
+});
+
+const TransformTable = new Table(TransformSchema, {
+  name: "transforms",
+  partitionKey: "id",
+});
+
+const ttlRepo = db.makeRepo(TransformTable, {
+  transformAttributes: { email: (v) => v.toLowerCase() },
+  computedAttributes: {
+    ttl: {
+      from: "expiresAt",
+      compute: (v: number | undefined) => (v !== undefined ? Math.floor(v / 1000) : undefined),
+    },
+    orgId: {
+      from: "user",
+      compute: (v: { orgId: string } | undefined) => v?.orgId,
+    },
+  },
+});
+
+describe("transformAttributes and computedAttributes types", () => {
+  test("put accepts full schema including computed fields", () => {
+    void ttlRepo.put({ id: "a", email: "X@Y.COM", ttl: 999 });
+    void ttlRepo.put({ id: "a", email: "X@Y.COM", orgId: "o1" });
+    void ttlRepo.put({ id: "a", email: "X@Y.COM", expiresAt: 1000 });
+  });
+
+  test("computed fields are excluded from create input", () => {
+    // @ts-expect-error — ttl is a computed field
+    void ttlRepo.create({ id: "a", email: "X@Y.COM", ttl: 999 });
+    // @ts-expect-error — orgId is a computed field
+    void ttlRepo.create({ id: "a", email: "X@Y.COM", orgId: "o1" });
+  });
+
+  test("computed fields are excluded from update input", () => {
+    // @ts-expect-error — ttl is a computed field
+    void ttlRepo.update({ id: "a" }, { ttl: 999 });
+    // @ts-expect-error — orgId is a computed field
+    void ttlRepo.update({ id: "a" }, { orgId: "o1" });
+  });
+
+  test("valid create without computed fields compiles", () => {
+    void ttlRepo.create({ id: "a", email: "X@Y.COM" });
+    void ttlRepo.create({ id: "a", email: "X@Y.COM", expiresAt: 1000 });
+  });
+
+  test("valid update without computed fields compiles", () => {
+    void ttlRepo.update({ id: "a" }, { email: "new@email.com" });
+    void ttlRepo.update({ id: "a" }, { expiresAt: 2000 });
+  });
+
+  test("transformAttributes rejects wrong return type", () => {
+    db.makeRepo(TransformTable, {
+      transformAttributes: {
+        // @ts-expect-error — must return same type (number, not string)
+        expiresAt: (v) => String(v),
+      },
+    });
+  });
+
+  test("computedAttributes from links to correct compute parameter type", () => {
+    db.makeRepo(TransformTable, {
+      computedAttributes: {
+        ttl: {
+          from: "expiresAt",
+          // @ts-expect-error — expiresAt is number | undefined, not string
+          compute: (v: string) => v.length,
+        },
+      },
+    });
+  });
+
+  test("computedAttributes rejects invalid from field", () => {
+    db.makeRepo(TransformTable, {
+      computedAttributes: {
+        ttl: {
+          // @ts-expect-error — "nope" is not a valid schema field
+          from: "nope",
+          compute: (v: number | undefined) => v,
+        },
+      },
+    });
   });
 });

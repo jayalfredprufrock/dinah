@@ -46,7 +46,8 @@
   },
   "scripts": {
     "dev": "vp pack --watch",
-    "prepare": "vp config"
+    "prepare": "vp config",
+    "db": "docker run --rm -p 8000:8000 amazon/dynamodb-local"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.1035.0",

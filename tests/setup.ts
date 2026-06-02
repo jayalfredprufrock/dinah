@@ -61,11 +61,24 @@ export const AuditTable = new Table(AuditSchema, {
 });
 
 export class AuditRepo extends makeRepo(AuditTable, {
-  defaultPutData: () => ({ createdAt: 1000, updatedAt: 1000 }),
+  defaultCreateData: () => ({ createdAt: 1000, updatedAt: 1000 }),
   defaultUpdateData: () => ({ updatedAt: 2000 }),
 }) {}
 
-export const ALL_TABLES = [UserTable, PostTable, AuditTable];
+export const TransformSchema = Type.Object({
+  id: Type.String(),
+  email: Type.String(),
+  expiresAt: Type.Optional(Type.Number()),
+  ttl: Type.Optional(Type.Number()),
+});
+
+export const TransformTable = new Table(TransformSchema, {
+  name: "transforms",
+  partitionKey: "id",
+  billingMode: "PAY_PER_REQUEST",
+});
+
+export const ALL_TABLES = [UserTable, PostTable, AuditTable, TransformTable];
 
 export function createDb(): Db {
   return new Db({

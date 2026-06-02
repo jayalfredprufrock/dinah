@@ -16,7 +16,7 @@ import { DinahError } from "./error";
 import type { TransactGetCommandInput, TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
 import * as Lib from "@aws-sdk/lib-dynamodb";
 import { ExpressionBuilder } from "./expression-builder";
-import { Repo, type RepoConfig } from "./repo";
+import { Repo, type ComputedFieldDef, type RepoConfig } from "./repo";
 import type { Table } from "./table";
 import type {
   DbBatchGet,
@@ -39,7 +39,7 @@ import type {
   DbTrxWriteRequest,
   DbUpdate,
 } from "./db.types";
-import type { ExtractTableSchema, Obj } from "./types";
+import type { AllKeys, ExtractTableSchema, Obj } from "./types";
 import { extractTableDesc, matchesPartial, removeUndefined } from "./util";
 
 // TODO
@@ -86,8 +86,10 @@ export class Db {
     TDefaults extends Partial<ExtractTableSchema<T>> = {},
     TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
     TOutput = ExtractTableSchema<T>,
-    const TDerived extends keyof ExtractTableSchema<T> = never,
-    const TImmutable extends keyof ExtractTableSchema<T> = never,
+    const TComputed extends {
+      [K in keyof ExtractTableSchema<T>]?: ComputedFieldDef<ExtractTableSchema<T>, K>;
+    } = {},
+    const TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
     const TDiscriminator extends keyof ExtractTableSchema<T> = never,
   >(
     table: T,
@@ -96,11 +98,11 @@ export class Db {
       TDefaults,
       TUpdateDefaults,
       TOutput,
-      TDerived,
+      TComputed,
       TImmutable,
       TDiscriminator
     >,
-  ): Repo<T, TDefaults, TUpdateDefaults, TOutput, TDerived, TImmutable, TDiscriminator> {
+  ): Repo<T, TDefaults, TUpdateDefaults, TOutput, TComputed, TImmutable, TDiscriminator> {
     return new Repo(this, table, config);
   }
 

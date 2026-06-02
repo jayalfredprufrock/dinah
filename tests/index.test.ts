@@ -1,7 +1,15 @@
 // @ts-nocheck
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { DinahError, isDinahError } from "../src";
-import { AuditRepo, PostTable, UserTable, createDb, createTables, dropTables } from "./setup";
+import {
+  AuditRepo,
+  PostTable,
+  TransformTable,
+  UserTable,
+  createDb,
+  createTables,
+  dropTables,
+} from "./setup";
 
 const db = createDb();
 const userRepo = db.makeRepo(UserTable);
@@ -836,5 +844,81 @@ describe("filter on missing attributes", () => {
     const eqIds = eqResults.map((r) => r.userId);
     expect(eqIds).toContain("u-has-age");
     expect(eqIds).not.toContain("u-no-age");
+  });
+});
+
+// ─── transformAttributes and computedAttributes ────────────────────────────────────────
+
+const transformRepo = db.makeRepo(TransformTable, {
+  transformAttributes: {
+    email: (v) => v.toLowerCase(),
+  },
+  computedAttributes: {
+    ttl: {
+      from: "expiresAt",
+      compute: (v) => (v !== undefined ? Math.floor(v / 1000) : undefined),
+    },
+  },
+});
+
+describe("transformAttributes", () => {
+  test("create applies field transform before writing", async () => {
+    await transformRepo.create({ id: "ft-1", email: "UPPER@CASE.COM", expiresAt: 5000 });
+    const result = await transformRepo.get({ id: "ft-1" });
+    expect(result!.email).toBe("upper@case.com");
+  });
+
+  test("update applies field transform to direct value", async () => {
+    await transformRepo.update({ id: "ft-1" }, { email: "NEW@EMAIL.COM" });
+    const result = await transformRepo.get({ id: "ft-1" });
+    expect(result!.email).toBe("new@email.com");
+  });
+
+  test("update applies field transform to $set value", async () => {
+    await transformRepo.update({ id: "ft-1" }, { email: { $set: "SET@EMAIL.COM" } });
+    const result = await transformRepo.get({ id: "ft-1" });
+    expect(result!.email).toBe("set@email.com");
+  });
+});
+
+describe("computedAttributes", () => {
+  test("create computes derived field from source", async () => {
+    await transformRepo.create({ id: "cf-1", email: "a@b.com", expiresAt: 5000 });
+    const result = await transformRepo.get({ id: "cf-1" });
+    expect(result!.ttl).toBe(5);
+  });
+
+  test("create without source field omits the computed field", async () => {
+    await transformRepo.create({ id: "cf-2", email: "a@b.com" });
+    const result = await transformRepo.get({ id: "cf-2" });
+    expect(result!.ttl).toBeUndefined();
+  });
+
+  test("update recomputes derived field when source is updated", async () => {
+    await transformRepo.update({ id: "cf-1" }, { expiresAt: 9000 });
+    const result = await transformRepo.get({ id: "cf-1" });
+    expect(result!.ttl).toBe(9);
+  });
+
+  test("update leaves derived field untouched when source is not updated", async () => {
+    await transformRepo.update({ id: "cf-1" }, { email: "other@test.com" });
+    const result = await transformRepo.get({ id: "cf-1" });
+    expect(result!.ttl).toBe(9);
+  });
+
+  test("update cascades removal when source is removed", async () => {
+    await transformRepo.update({ id: "cf-1" }, { expiresAt: undefined });
+    const result = await transformRepo.get({ id: "cf-1" });
+    expect(result!.expiresAt).toBeUndefined();
+    expect(result!.ttl).toBeUndefined();
+  });
+
+  test("update with $plus on source field throws VALIDATION DinahError", async () => {
+    await transformRepo.create({ id: "cf-plus", email: "a@b.com", expiresAt: 1000 });
+    const err = await transformRepo
+      .update({ id: "cf-plus" }, { expiresAt: { $plus: 500 } })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(DinahError);
+    expect(err.details.type).toBe("VALIDATION");
   });
 });

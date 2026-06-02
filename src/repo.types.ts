@@ -3,6 +3,7 @@ import type { Table } from "./table";
 import type {
   AllKeys,
   Condition,
+  DistOmit,
   DistPartialSome,
   ExtractKey,
   ExtractTableDef,
@@ -20,19 +21,30 @@ import type {
 export type RepoKey<R extends RepoBase> = Partial<R["$schema"]> &
   ExtractKey<R["$schema"], R["$def"]>;
 
-export type RepoPutItem<R extends RepoBase> = Omit<
-  DistPartialSome<R["$schema"], keyof R["defaultPutData"]>,
-  R["$derivedAttributes"]
->;
+export type RepoPutItem<R extends RepoBase> = R["$schema"];
 
 export type RepoUpdateItem<R extends RepoBase> = DistPartialSome<
-  Omit<R["$schema"], R["$derivedAttributes"] | R["$immutableAttributes"]>,
+  Omit<R["$schema"], R["$computedAttributes"] | R["$immutableAttributes"]>,
   keyof R["defaultUpdateData"]
 >;
 
 export type RepoUpdateInput<R extends RepoBase> = RepoUpdateData<
-  Omit<R["$schema"], R["$derivedAttributes"] | R["$immutableAttributes"]>
+  Omit<R["$schema"], R["$computedAttributes"] | R["$immutableAttributes"]>
 >;
+
+// Narrows the update input based on the key argument. When the repo has a
+// discriminator and the key carries a literal value for it, the union variant
+// is selected and variant-specific fields become writable.
+export type RepoUpdateInputFor<R extends RepoBase, K> = [R["$discriminator"]] extends [never]
+  ? RepoUpdateInput<R>
+  : [ExtractDiscriminatorValue<K, R["$discriminator"]>] extends [never]
+    ? RepoUpdateInput<R>
+    : RepoUpdateData<
+        DistOmit<
+          NarrowByDiscriminator<R["$schema"], R["$discriminator"], K>,
+          R["$computedAttributes"] | R["$immutableAttributes"]
+        >
+      >;
 
 export type GsiNames<R extends RepoBase> = keyof NonNullable<R["table"]["def"]["gsis"]> & string;
 
@@ -75,8 +87,13 @@ type GsiIncludedAttributes<R extends RepoBase, G extends string> = Extract<
   readonly any[]
 >[number];
 
-type MakeRequired<T, K extends keyof any> = Omit<T, Extract<K, keyof T>> &
-  Required<Pick<T, Extract<K, keyof T>>>;
+// Distributes over T so that union variants survive. Without distribution, the
+// inner `Omit` collapses through `keyof (A | B)` and the result loses every
+// variant-specific key — breaking GSI projection result types for discriminated
+// unions.
+type MakeRequired<T, K extends keyof any> = T extends unknown
+  ? Omit<T, Extract<K, keyof T>> & Required<Pick<T, Extract<K, keyof T>>>
+  : never;
 
 export type ApplyGsiProjection<R extends RepoBase, O, G extends string> = O extends {
   projection: ReadonlyArray<infer P extends AllKeys<R["$schema"]>>;
@@ -120,7 +137,10 @@ export type RepoPutResult<R extends RepoBase, TItem = {}> = NarrowByDiscriminato
 
 // create ---------------------------------------------------------------------------------------------
 
-export type RepoCreateItem<R extends RepoBase> = RepoPutItem<R>;
+export type RepoCreateItem<R extends RepoBase> = Omit<
+  DistPartialSome<R["$schema"], keyof R["defaultCreateData"]>,
+  R["$computedAttributes"]
+> & { readonly [K in R["$computedAttributes"]]?: never };
 
 export interface RepoCreateOptions<R extends RepoBase> {
   condition?: Condition<R["$schema"]>;
@@ -347,7 +367,7 @@ export interface RepoTrxUpdateRequest<R extends RepoBase> {
   table: string;
   type: "UPDATE";
   key: RepoKey<R>;
-  update: RepoUpdateData<Omit<R["$schema"], R["$derivedAttributes"] | R["$immutableAttributes"]>>;
+  update: RepoUpdateData<Omit<R["$schema"], R["$computedAttributes"] | R["$immutableAttributes"]>>;
   condition?: Condition<R["$schema"]>;
 }
 

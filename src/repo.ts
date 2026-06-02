@@ -43,12 +43,13 @@ import type {
   RepoTrxGetResult,
   RepoTrxWriteRequest,
   RepoUpdateInput,
+  RepoUpdateInputFor,
   RepoUpdateOptions,
   RepoUpdateResult,
   RepoQueryGsiQuery,
   RepoQueryQuery,
 } from "./repo.types";
-import type { Condition, ExtractTableDef, ExtractTableSchema, Obj } from "./types";
+import type { AllKeys, Condition, ExtractTableDef, ExtractTableSchema, Obj } from "./types";
 import { isOperation } from "./expression-builder";
 import { DinahError } from "./error";
 import { matchesPartial } from "./util";
@@ -63,31 +64,35 @@ import { matchesPartial } from "./util";
 export interface RepoBase {
   readonly $schema: object;
   readonly $def: { readonly partitionKey: string; readonly sortKey?: string };
-  readonly $derivedAttributes: PropertyKey;
+  readonly $computedAttributes: PropertyKey;
   readonly $immutableAttributes: PropertyKey;
   readonly $discriminator: PropertyKey;
   readonly table: Table;
-  readonly defaultPutData: object;
+  readonly defaultCreateData: object;
   readonly defaultUpdateData: object;
   transformOutput(item: never): unknown;
 }
+
+export type ComputedFieldDef<TSchema extends object, K extends keyof TSchema> = {
+  [J in keyof TSchema]: { from: J; compute: (val: TSchema[J]) => TSchema[K] };
+}[keyof TSchema];
 
 export interface RepoConfig<
   TSchema extends object,
   TDefaults extends Partial<TSchema> = {},
   TUpdateDefaults extends Partial<TSchema> = {},
   TOutput = TSchema,
-  TDerived extends keyof TSchema = never,
-  TImmutable extends keyof TSchema = never,
+  TComputed extends { [K in keyof TSchema]?: ComputedFieldDef<TSchema, K> } = {},
+  TImmutable extends AllKeys<TSchema> = never,
   TDiscriminator extends keyof TSchema = never,
 > {
   resourceName?: string;
   discriminator?: TDiscriminator;
-  defaultPutData?: () => TDefaults;
+  defaultCreateData?: () => TDefaults;
   defaultUpdateData?: () => TUpdateDefaults;
-  transformInput?: (item: Partial<TSchema>) => Partial<TSchema>;
+  transformAttributes?: { [K in keyof TSchema]?: (val: TSchema[K]) => TSchema[K] };
+  computedAttributes?: TComputed;
   transformOutput?: (item: TSchema) => TOutput;
-  derivedAttributes?: readonly TDerived[];
   immutableAttributes?: readonly TImmutable[];
 }
 
@@ -96,15 +101,17 @@ export class Repo<
   TDefaults extends Partial<ExtractTableSchema<T>> = {},
   TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
   TOutput = ExtractTableSchema<T>,
-  TDerived extends keyof ExtractTableSchema<T> = never,
-  TImmutable extends keyof ExtractTableSchema<T> = never,
+  TComputed extends {
+    [K in keyof ExtractTableSchema<T>]?: ComputedFieldDef<ExtractTableSchema<T>, K>;
+  } = {},
+  TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
   TDiscriminator extends keyof ExtractTableSchema<T> = never,
 > {
   // these phantom properties are used to pre-compute types derived from T
   // which allows easy lookups using the "this" Repo type
   declare readonly $schema: ExtractTableSchema<T>;
   declare readonly $def: ExtractTableDef<T>;
-  declare readonly $derivedAttributes: TDerived;
+  declare readonly $computedAttributes: keyof TComputed;
   declare readonly $immutableAttributes: TImmutable;
   declare readonly $discriminator: TDiscriminator;
 
@@ -115,7 +122,7 @@ export class Repo<
     TDefaults,
     TUpdateDefaults,
     TOutput,
-    TDerived,
+    TComputed,
     TImmutable,
     TDiscriminator
   >;
@@ -128,7 +135,7 @@ export class Repo<
       TDefaults,
       TUpdateDefaults,
       TOutput,
-      TDerived,
+      TComputed,
       TImmutable,
       TDiscriminator
     >,
@@ -152,8 +159,8 @@ export class Repo<
     return t.charAt(0).toUpperCase() + t.slice(1);
   }
 
-  get defaultPutData(): TDefaults {
-    return (this.config.defaultPutData?.() ?? {}) as TDefaults;
+  get defaultCreateData(): TDefaults {
+    return (this.config.defaultCreateData?.() ?? {}) as TDefaults;
   }
 
   get defaultUpdateData(): TUpdateDefaults {
@@ -162,10 +169,6 @@ export class Repo<
 
   transformOutput(item: ExtractTableSchema<T>): TOutput {
     return (this.config.transformOutput?.(item) ?? item) as TOutput;
-  }
-
-  transformInput(item: Partial<ExtractTableSchema<T>>): Partial<ExtractTableSchema<T>> {
-    return this.config.transformInput?.(item) ?? item;
   }
 
   // TODO: should this throw if pk is missing?
@@ -215,31 +218,28 @@ export class Repo<
     item: T,
     options?: RepoPutOptions<this>,
   ): Promise<RepoPutResult<this, T>> {
-    const itemWithDefaults = this.applyPutTransforms(item);
     const result = await this.db.put({
       table: this.tableName,
-      item: itemWithDefaults,
+      item: item as any,
       resource: this.resourceName,
       ...options,
     });
     return this.applyTransformIfNeeded(result) as any;
   }
 
-  async update(
-    key: RepoKey<this>,
-    update: RepoUpdateInput<this>,
+  async update<const K extends RepoKey<this>>(
+    key: K,
+    update: RepoUpdateInputFor<this, K>,
     options?: RepoUpdateOptions<this>,
   ): Promise<RepoUpdateResult<this>> {
-    const updateWithDefaults = this.applyNormalizersToExpression({
-      ...this.defaultUpdateData,
-      ...update,
-    });
+    const updateWithDefaults = this.applyNormalizersToExpression(update as Obj);
     const result = await this.db.update({
       table: this.tableName,
       key: this.extractKey(key),
       resource: this.resourceName,
       update: updateWithDefaults as any,
       ...options,
+      condition: this.withDiscriminatorCondition(key, options?.condition),
     });
     return this.applyTransformIfNeeded(result);
   }
@@ -256,7 +256,15 @@ export class Repo<
       condition.$and.push(otherCondition);
     }
 
-    return this.put(item, { condition, ...otherOptions });
+    const normalizedItem = this.applyCreateTransforms(item as Obj);
+    const result = await this.db.put({
+      table: this.tableName,
+      item: normalizedItem,
+      resource: this.resourceName,
+      condition,
+      ...otherOptions,
+    });
+    return this.applyTransformIfNeeded(result) as any;
   }
 
   async delete(
@@ -467,8 +475,7 @@ export class Repo<
         if (request.type === "DELETE") {
           return { type: "DELETE", key: this.extractKey(request.key) };
         } else {
-          const itemWithDefaults = this.applyPutTransforms(request.item);
-          return { type: "PUT", item: itemWithDefaults };
+          return { type: "PUT", item: request.item };
         }
       }),
     });
@@ -483,10 +490,7 @@ export class Repo<
     keys: RepoKey<this>[],
     update: RepoUpdateInput<this>,
   ): Promise<RepoBatchUpdateResult<this>> {
-    const updateWithDefaults = this.applyNormalizersToExpression({
-      ...this.defaultUpdateData,
-      ...update,
-    });
+    const updateWithDefaults = this.applyNormalizersToExpression(update as Obj);
     const result = await this.db.batchUpdate({
       [this.tableName]: {
         keys: keys.map((key) => this.extractKey(key)),
@@ -558,7 +562,11 @@ export class Repo<
 
           case "UPDATE": {
             const { key, update, ...options } = request;
-            return this.trxUpdateRequest(key, update, options);
+            return this.trxUpdateRequest(
+              key,
+              update as RepoUpdateInputFor<this, typeof key>,
+              options,
+            );
           }
 
           default:
@@ -582,7 +590,11 @@ export class Repo<
     update: RepoUpdateInput<this>,
     options?: RepoUpdateOptions<this>,
   ): Promise<void> {
-    return this.db.trxWrite(...keys.map((key) => this.trxUpdateRequest(key, update, options)));
+    return this.db.trxWrite(
+      ...keys.map((key) =>
+        this.trxUpdateRequest(key, update as RepoUpdateInputFor<this, typeof key>, options),
+      ),
+    );
   }
 
   // todo: return items
@@ -614,25 +626,22 @@ export class Repo<
   }
 
   trxPutRequest(item: RepoPutItem<this>, options?: RepoPutOptions<this>): DbTrxWriteRequest {
-    const itemWithDefaults = this.applyPutTransforms(item);
-    return { table: this.tableName, type: "PUT", item: itemWithDefaults, ...options };
+    return { table: this.tableName, type: "PUT", item: item as any, ...options };
   }
 
-  trxUpdateRequest(
-    key: RepoKey<this>,
-    update: RepoUpdateInput<this>,
+  trxUpdateRequest<const K extends RepoKey<this>>(
+    key: K,
+    update: RepoUpdateInputFor<this, K>,
     options?: RepoUpdateOptions<this>,
   ): DbTrxWriteRequest {
-    const updateWithDefaults = this.applyNormalizersToExpression({
-      ...this.defaultUpdateData,
-      ...update,
-    });
+    const updateWithDefaults = this.applyNormalizersToExpression(update as Obj);
     return {
       table: this.tableName,
       type: "UPDATE",
       key: this.extractKey(key),
       update: updateWithDefaults as any,
       ...options,
+      condition: this.withDiscriminatorCondition(key, options?.condition),
     };
   }
 
@@ -648,73 +657,143 @@ export class Repo<
       condition.$and.push(otherCondition);
     }
 
-    const itemWithDefaults = this.applyPutTransforms(item);
+    const normalizedItem = this.applyCreateTransforms(item as Obj);
 
     return {
       table: this.tableName,
       type: "PUT",
-      item: itemWithDefaults,
+      item: normalizedItem,
       condition,
       ...otherOptions,
     };
   }
 
-  private applyPutTransforms(item: Obj): Partial<ExtractTableSchema<T>> {
-    const normalized = this.transformInput({ ...this.defaultPutData, ...item });
-    const result = { ...normalized } as Obj;
-    for (const key of this.config.derivedAttributes ?? []) {
-      delete result[key as string];
-    }
-    return result as Partial<ExtractTableSchema<T>>;
-  }
+  private applyCreateTransforms(item: Obj): Partial<ExtractTableSchema<T>> {
+    const { transformAttributes, computedAttributes } = this.config;
 
-  private applyNormalizersToExpression(expression: Obj): Obj {
-    const partial: Obj = {};
-    for (const [key, val] of Object.entries(expression)) {
-      if (val === undefined || (isOperation(val) && val.$remove === true)) {
-        partial[key] = undefined;
-      } else if (!isOperation(val)) {
-        partial[key] = val;
-      } else if (val.$set !== undefined) {
-        partial[key] = val.$set;
-      } else if (val.$ifNotExists !== undefined) {
-        partial[key] = Array.isArray(val.$ifNotExists) ? val.$ifNotExists[1] : val.$ifNotExists;
+    if (computedAttributes) {
+      for (const key of Object.keys(computedAttributes)) {
+        if (key in item) {
+          throw new DinahError({
+            type: "VALIDATION",
+            message: `Field "${key}" is a computed attribute and cannot be set directly. Remove it from the create input.`,
+          });
+        }
       }
     }
 
-    const normalized = this.transformInput(partial as Partial<ExtractTableSchema<T>>);
+    const merged: Obj = { ...this.defaultCreateData, ...item };
 
-    const result = { ...expression };
-    for (const [key, normalizedVal] of Object.entries(normalized)) {
-      if (normalizedVal === undefined) continue;
-      const wasRemove = key in partial && partial[key] === undefined;
-      if (wasRemove || !(key in partial)) {
-        result[key] = normalizedVal;
-      } else {
-        const original = expression[key];
-        if (!isOperation(original)) {
-          result[key] = normalizedVal;
-        } else if ((original as Obj).$set !== undefined) {
-          result[key] = { ...(original as Obj), $set: normalizedVal };
-        } else if ((original as Obj).$ifNotExists !== undefined) {
+    if (transformAttributes) {
+      for (const [key, transform] of Object.entries(transformAttributes)) {
+        if (key in merged && merged[key] !== undefined) {
+          merged[key] = (transform as (v: unknown) => unknown)(merged[key]);
+        }
+      }
+    }
+
+    if (computedAttributes) {
+      for (const [key, def] of Object.entries(computedAttributes)) {
+        const { from, compute } = def as { from: string; compute: (v: unknown) => unknown };
+        const computed = compute(merged[from]);
+        if (computed !== undefined) {
+          merged[key] = computed;
+        } else {
+          delete merged[key];
+        }
+      }
+    }
+
+    return merged as Partial<ExtractTableSchema<T>>;
+  }
+
+  private applyNormalizersToExpression(userUpdate: Obj): Obj {
+    const { transformAttributes, computedAttributes, immutableAttributes } = this.config;
+
+    if (computedAttributes) {
+      for (const key of Object.keys(computedAttributes)) {
+        if (key in userUpdate) {
+          throw new DinahError({
+            type: "VALIDATION",
+            message: `Field "${key}" is a computed attribute and cannot be set directly in an update. Update the source field instead.`,
+          });
+        }
+      }
+    }
+
+    for (const key of immutableAttributes ?? []) {
+      if ((key as string) in userUpdate) {
+        throw new DinahError({
+          type: "VALIDATION",
+          message: `Field "${key as string}" is immutable and cannot be updated.`,
+        });
+      }
+    }
+
+    const result: Obj = { ...this.defaultUpdateData, ...userUpdate };
+
+    if (transformAttributes) {
+      for (const [key, transform] of Object.entries(transformAttributes)) {
+        if (!(key in result)) continue;
+        const val = result[key];
+        const fn = transform as (v: unknown) => unknown;
+        if (val === undefined || (isOperation(val) && val.$remove === true)) {
+          // nothing to transform
+        } else if (!isOperation(val)) {
+          result[key] = fn(val);
+        } else if (val.$set !== undefined) {
+          result[key] = { ...val, $set: fn(val.$set) };
+        } else if (val.$ifNotExists !== undefined) {
+          const ifne = val.$ifNotExists as unknown;
           result[key] = {
-            ...(original as Obj),
-            $ifNotExists: Array.isArray((original as Obj).$ifNotExists)
-              ? [(original as Obj).$ifNotExists[0], normalizedVal]
-              : normalizedVal,
+            ...val,
+            $ifNotExists: Array.isArray(ifne)
+              ? [(ifne as unknown[])[0], fn((ifne as unknown[])[1])]
+              : fn(ifne),
           };
         }
       }
     }
 
-    for (const key of [
-      ...(this.config.derivedAttributes ?? []),
-      ...(this.config.immutableAttributes ?? []),
-    ]) {
-      delete result[key as string];
+    if (computedAttributes) {
+      for (const [computedKey, def] of Object.entries(computedAttributes)) {
+        const { from, compute } = def as { from: string; compute: (v: unknown) => unknown };
+        if (!(from in result)) continue;
+
+        const val = result[from];
+        if (val === undefined || (isOperation(val) && val.$remove === true)) {
+          result[computedKey] = undefined;
+        } else if (!isOperation(val)) {
+          result[computedKey] = compute(val);
+        } else if (val.$set !== undefined) {
+          result[computedKey] = compute(val.$set);
+        } else {
+          throw new DinahError({
+            type: "VALIDATION",
+            message: `Field "${from}" drives computed field "${computedKey}" and cannot use arithmetic or list operators in updates.`,
+          });
+        }
+      }
     }
 
     return result;
+  }
+
+  // If the caller passed a key that carries the configured discriminator
+  // value, AND condition that field against the same value. Guards against the
+  // row on the wire having a different variant than the type-level narrowing
+  // assumed.
+  private withDiscriminatorCondition(
+    key: Obj,
+    condition: Condition<ExtractTableSchema<T>> | undefined,
+  ): Condition<ExtractTableSchema<T>> | undefined {
+    const discriminator = this.config.discriminator as string | undefined;
+    if (!discriminator) return condition;
+    const value = key[discriminator];
+    if (value === undefined) return condition;
+    const guard = { [discriminator]: value } as Condition<ExtractTableSchema<T>>;
+    if (!condition) return guard;
+    return { $and: [guard, condition] } as Condition<ExtractTableSchema<T>>;
   }
 
   protected applyTransformsIfNeeded(
@@ -743,11 +822,13 @@ export interface MakeRepoResult<
   TDefaults extends Partial<ExtractTableSchema<T>> = {},
   TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
   TOutput = ExtractTableSchema<T>,
-  TDerived extends keyof ExtractTableSchema<T> = never,
-  TImmutable extends keyof ExtractTableSchema<T> = never,
+  TComputed extends {
+    [K in keyof ExtractTableSchema<T>]?: ComputedFieldDef<ExtractTableSchema<T>, K>;
+  } = {},
+  TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
   TDiscriminator extends keyof ExtractTableSchema<T> = never,
 > {
-  new (db: Db): Repo<T, TDefaults, TUpdateDefaults, TOutput, TDerived, TImmutable, TDiscriminator>;
+  new (db: Db): Repo<T, TDefaults, TUpdateDefaults, TOutput, TComputed, TImmutable, TDiscriminator>;
   readonly table: T;
 }
 
@@ -756,8 +837,10 @@ export const makeRepo = <
   TDefaults extends Partial<ExtractTableSchema<T>> = {},
   TUpdateDefaults extends Partial<ExtractTableSchema<T>> = {},
   TOutput = ExtractTableSchema<T>,
-  const TDerived extends keyof ExtractTableSchema<T> = never,
-  const TImmutable extends keyof ExtractTableSchema<T> = never,
+  const TComputed extends {
+    [K in keyof ExtractTableSchema<T>]?: ComputedFieldDef<ExtractTableSchema<T>, K>;
+  } = {},
+  const TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
   const TDiscriminator extends keyof ExtractTableSchema<T> = never,
 >(
   table: T,
@@ -766,17 +849,25 @@ export const makeRepo = <
     TDefaults,
     TUpdateDefaults,
     TOutput,
-    TDerived,
+    TComputed,
     TImmutable,
     TDiscriminator
   >,
-): MakeRepoResult<T, TDefaults, TUpdateDefaults, TOutput, TDerived, TImmutable, TDiscriminator> => {
+): MakeRepoResult<
+  T,
+  TDefaults,
+  TUpdateDefaults,
+  TOutput,
+  TComputed,
+  TImmutable,
+  TDiscriminator
+> => {
   return class extends Repo<
     T,
     TDefaults,
     TUpdateDefaults,
     TOutput,
-    TDerived,
+    TComputed,
     TImmutable,
     TDiscriminator
   > {

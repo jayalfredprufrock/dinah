@@ -16,6 +16,16 @@ export type DistPartialSome<T, K extends string | number | symbol> = T extends u
   ? PartialSome<T, K>
   : never;
 
+/**
+ * Distributive Omit. `Omit<A | B, K>` collapses through `keyof (A | B)` (which is
+ * only the intersection of keys), so non-shared keys survive the omission even
+ * when listed. `DistOmit` distributes over the union so each variant's own
+ * keys are omitted independently.
+ */
+export type DistOmit<T, K extends string | number | symbol> = T extends unknown
+  ? Omit<T, Extract<K, keyof T>>
+  : never;
+
 export type ExtractTableDef<T> = T extends Table<any, infer Def> ? Def : never;
 export type ExtractTableSchema<T> =
   T extends Table<infer Schema, any>
