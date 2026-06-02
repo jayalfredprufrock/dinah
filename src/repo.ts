@@ -91,7 +91,7 @@ export interface RepoConfig<
   defaultCreateData?: () => TDefaults;
   defaultUpdateData?: () => TUpdateDefaults;
   transformAttributes?: { [K in keyof TSchema]?: (val: TSchema[K]) => TSchema[K] };
-  computedAttributes?: TComputed;
+  computedAttributes?: TComputed & { [K in keyof TSchema]?: ComputedFieldDef<TSchema, K> };
   transformOutput?: (item: TSchema) => TOutput;
   immutableAttributes?: readonly TImmutable[];
 }

@@ -1373,6 +1373,20 @@ describe("transformAttributes and computedAttributes types", () => {
     });
   });
 
+  test("computedAttributes compute parameter is inferred from 'from' field", () => {
+    db.makeRepo(TransformTable, {
+      computedAttributes: {
+        ttl: {
+          from: "expiresAt",
+          compute: (v) => {
+            expectTypeOf(v).toEqualTypeOf<number | undefined>();
+            return v !== undefined ? Math.floor(v / 1000) : undefined;
+          },
+        },
+      },
+    });
+  });
+
   test("computedAttributes from links to correct compute parameter type", () => {
     db.makeRepo(TransformTable, {
       computedAttributes: {
