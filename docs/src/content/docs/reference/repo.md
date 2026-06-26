@@ -216,10 +216,12 @@ Puts an item. `defaultPutData` is merged **under** `item` (caller wins on confli
 ### `create(item, options?)`
 
 ```typescript
-create(item: PutItem, options?: { condition?: Obj }): Promise<Item>
+create(item: PutItem): Promise<Item>
 ```
 
-Like `put`, but fails if an item with the same primary key already exists. Dinah adds a `{ [partitionKey]: { $exists: false } }` condition, combined with your condition via `$and` if you supply one. On conflict, DynamoDB throws a `ConditionalCheckFailedException`.
+Like `put`, but fails if an item with the same primary key already exists. Dinah adds a `{ [partitionKey]: { $exists: false } }` condition.
+
+When the primary key is already in use, `create` throws a `DinahError` with `details.type === "ALREADY_EXISTS"`, distinct from the `CONDITIONAL_CHECK_FAILED` raised by `put`/`update`/`delete` condition failures.
 
 ### `update(key, update, options?)`
 

@@ -9,7 +9,7 @@ Dinah accepts a MongoDB-like query syntax for three distinct purposes:
 
 1. **Key conditions** — the `query` argument to `query` / `queryGsi` / `queryPaged` / `queryGsiPaged`.
 2. **Filter expressions** — the `filter` option on queries, scans, and `exists`.
-3. **Condition expressions** — the `condition` option on `put`, `update`, `delete`, `create`, and transaction requests.
+3. **Condition expressions** — the `condition` option on `put`, `update`, `delete`, and transaction requests.
 
 All three use the same operator set. Internally, Dinah compiles them to DynamoDB expressions via its `ExpressionBuilder`.
 

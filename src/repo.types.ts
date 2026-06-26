@@ -142,10 +142,6 @@ export type RepoCreateItem<R extends RepoBase> = Omit<
   R["$computedAttributes"]
 > & { readonly [K in R["$computedAttributes"]]?: never };
 
-export interface RepoCreateOptions<R extends RepoBase> {
-  condition?: Condition<R["$schema"]>;
-}
-
 export type RepoCreateResult<R extends RepoBase, TItem = {}> = NarrowByDiscriminator<
   RepoOutput<R>,
   R["$discriminator"],

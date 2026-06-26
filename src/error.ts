@@ -1,5 +1,6 @@
 export type DinahErrorDetails =
   | { type: "NOT_FOUND"; key: Record<string, unknown>; resource?: string }
+  | { type: "ALREADY_EXISTS"; key: Record<string, unknown>; resource?: string }
   | { type: "CONDITIONAL_CHECK_FAILED"; key?: Record<string, unknown>; resource?: string }
   | { type: "VALIDATION"; message: string }
   | { type: "TRANSACTION_CANCELED"; reasons: Array<{ type: string; message?: string }> }
@@ -8,11 +9,11 @@ export type DinahErrorDetails =
 function dinahErrorMessage(details: DinahErrorDetails): string {
   switch (details.type) {
     case "NOT_FOUND":
-      return `${details.resource ?? "Item"} not found: ${JSON.stringify(details.key)}`;
+      return `${details.resource ?? "Item"} not found.`;
+    case "ALREADY_EXISTS":
+      return `${details.resource ?? "Item"} already exists.`;
     case "CONDITIONAL_CHECK_FAILED":
-      return details.key
-        ? `${details.resource ?? "Item"} condition check failed: ${JSON.stringify(details.key)}`
-        : `${details.resource ?? "Item"} condition check failed`;
+      return `${details.resource ?? "Item"} condition check failed.`;
     case "VALIDATION":
       return `Validation error: ${details.message}`;
     case "DATA_INTEGRITY":

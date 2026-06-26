@@ -53,6 +53,8 @@ import { extractTableDesc, matchesPartial, removeUndefined } from "./util";
 // - bug $in doesn't handle empty arrays, I imagine other operators are affected
 // - consider beforeCreate, beforePut, beforeUpdate, beforeDelete, after, etc.
 // - type out repo update data
+// - does it handle nested undefined removal? nested $remove
+// - maybe extract resourceName from schema?
 
 export class Db {
   readonly client: Lib.DynamoDBDocumentClient;

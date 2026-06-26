@@ -9,7 +9,6 @@ import type {
   RepoBatchUpdateResult,
   RepoBatchWrite,
   RepoBatchWriteResult,
-  RepoCreateOptions,
   RepoCreateItem,
   RepoCreateResult,
   RepoDeleteOptions,
@@ -267,26 +266,34 @@ export class Repo<
     return this.applyTransformIfNeeded(result);
   }
 
-  async create<const T extends RepoCreateItem<this>>(
-    item: T,
-    options?: RepoCreateOptions<this>,
-  ): Promise<RepoCreateResult<this, T>> {
-    const { condition: otherCondition, ...otherOptions } = options ?? {};
-
+  async create<const T extends RepoCreateItem<this>>(item: T): Promise<RepoCreateResult<this, T>> {
     const condition = { $and: [{ [this.table.def.partitionKey]: { $exists: false } }] } as any;
 
-    if (otherCondition) {
-      condition.$and.push(otherCondition);
-    }
-
     const normalizedItem = this.applyCreateTransforms(item as Obj);
-    const result = await this.db.put({
-      table: this.tableName,
-      item: normalizedItem,
-      resource: this.resourceName,
-      condition,
-      ...otherOptions,
-    });
+
+    let result: Obj;
+    try {
+      result = await this.db.put({
+        table: this.tableName,
+        item: normalizedItem,
+        resource: this.resourceName,
+        condition,
+      });
+    } catch (err) {
+      // The only condition `create` applies is the `<pk> not exists` guard, so a
+      // conditional check failure means an item with this key already exists.
+      if (err instanceof DinahError && err.details.type === "CONDITIONAL_CHECK_FAILED") {
+        throw new DinahError(
+          {
+            type: "ALREADY_EXISTS",
+            key: this.extractKey(item as RepoKey<this>) as Record<string, unknown>,
+            resource: this.resourceName,
+          },
+          { cause: err },
+        );
+      }
+      throw err;
+    }
     return this.applyTransformIfNeeded(result) as any;
   }
 
@@ -621,8 +628,8 @@ export class Repo<
   }
 
   // todo: return items
-  async trxCreate(items: RepoCreateItem<this>[], options?: RepoCreateOptions<this>): Promise<void> {
-    return this.db.trxWrite(...items.map((item) => this.trxCreateRequest(item, options)));
+  async trxCreate(items: RepoCreateItem<this>[]): Promise<void> {
+    return this.db.trxWrite(...items.map((item) => this.trxCreateRequest(item)));
   }
 
   trxGetRequest<O extends RepoGetOptions<this>>(
@@ -668,17 +675,8 @@ export class Repo<
     };
   }
 
-  trxCreateRequest(
-    item: RepoCreateItem<this>,
-    options?: RepoCreateOptions<this>,
-  ): DbTrxWriteRequest {
-    const { condition: otherCondition, ...otherOptions } = options ?? {};
-
+  trxCreateRequest(item: RepoCreateItem<this>): DbTrxWriteRequest {
     const condition = { $and: [{ [this.table.def.partitionKey]: { $exists: false } }] } as any;
-
-    if (otherCondition) {
-      condition.$and.push(otherCondition);
-    }
 
     const normalizedItem = this.applyCreateTransforms(item as Obj);
 
@@ -687,7 +685,6 @@ export class Repo<
       type: "PUT",
       item: normalizedItem,
       condition,
-      ...otherOptions,
     };
   }
 

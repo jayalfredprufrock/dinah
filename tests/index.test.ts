@@ -128,7 +128,7 @@ describe("create", () => {
     expect(result).toMatchObject(item);
   });
 
-  test("fails when item already exists with DinahError CONDITIONAL_CHECK_FAILED", async () => {
+  test("fails when item already exists with DinahError ALREADY_EXISTS", async () => {
     const item = {
       userId: "u-create",
       email: "c@d.com",
@@ -138,7 +138,7 @@ describe("create", () => {
     };
     const err = await userRepo.create(item).catch((e) => e);
     expect(err).toBeInstanceOf(DinahError);
-    expect(err.details.type).toBe("CONDITIONAL_CHECK_FAILED");
+    expect(err.details.type).toBe("ALREADY_EXISTS");
     expect(err.cause).toBeDefined();
   });
 });
