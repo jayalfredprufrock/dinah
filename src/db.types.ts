@@ -11,11 +11,11 @@ export interface DbListTables {
 
 export interface DbGet<T = Obj> {
   table: string;
-  key: Partial<T>;
+  key: Partial<NoInfer<T>>;
   resource?: string;
   consistent?: boolean;
-  projection?: AllKeys<T>[];
-  filter?: Partial<T>;
+  projection?: AllKeys<NoInfer<T>>[];
+  filter?: Partial<NoInfer<T>>;
 }
 
 export interface DbPut<T = Obj> {
@@ -35,33 +35,33 @@ export interface DbCreate<T = Obj> {
 
 export interface DbUpdate<T = Obj> {
   table: string;
-  key: Partial<T>;
+  key: Partial<NoInfer<T>>;
   resource?: string;
   update: UpdateExpression<T>;
-  condition?: Condition<T>;
+  condition?: Condition<NoInfer<T>>;
 }
 
 export interface DbUpsert<T = Obj> {
   table: string;
-  key: Partial<T>;
+  key: Partial<NoInfer<T>>;
   update: UpdateExpression<T>;
   item: T;
-  condition?: Condition<T>;
+  condition?: Condition<NoInfer<T>>;
 }
 
 export interface DbDelete<T = Obj> {
   table: string;
-  key: Partial<T>;
+  key: Partial<NoInfer<T>>;
   resource?: string;
-  condition?: Condition<T>;
+  condition?: Condition<NoInfer<T>>;
 }
 
 export interface DbQuery<T = Obj> {
   table: string;
   query: KeyCondition<T>;
-  startKey?: Partial<T>;
+  startKey?: Partial<NoInfer<T>>;
   filter?: Condition<T>;
-  projection?: AllKeys<T>[];
+  projection?: AllKeys<NoInfer<T>>[];
   limit?: number;
   index?: string;
   consistent?: boolean;
@@ -70,9 +70,9 @@ export interface DbQuery<T = Obj> {
 
 export interface DbScan<T = Obj> {
   table: string;
-  startKey?: Partial<T>;
+  startKey?: Partial<NoInfer<T>>;
   filter?: Condition<T>;
-  projection?: AllKeys<T>[];
+  projection?: AllKeys<NoInfer<T>>[];
   limit?: number;
   index?: string;
   consistent?: boolean;
@@ -84,16 +84,16 @@ export interface DbExists<T = Obj> {
   query?: KeyCondition<T>;
   filter?: Condition<T>;
   index?: string;
-  projection?: AllKeys<T>[];
+  projection?: AllKeys<NoInfer<T>>[];
   consistent?: boolean;
 }
 
 export interface DbBatchGetRequest<T = Obj> {
-  keys: Partial<T>[];
+  keys: Partial<NoInfer<T>>[];
   resource?: string;
   consistent?: boolean;
-  projection?: AllKeys<T>[];
-  filter?: Partial<T>;
+  projection?: AllKeys<NoInfer<T>>[];
+  filter?: Partial<NoInfer<T>>;
 }
 
 export type DbBatchGet = Obj<DbBatchGetRequest>;
@@ -123,7 +123,7 @@ export interface DbBatchWriteResponse {
 // batch update ------------------------------------------------------------------------------------
 
 export interface DbBatchUpdateRequest<T = Obj> {
-  keys: Partial<T>[];
+  keys: Partial<NoInfer<T>>[];
   update: UpdateExpression<T>;
 }
 
@@ -135,10 +135,10 @@ export interface DbBatchUpdateResponse {
 
 export interface DbTrxGetRequest<T = Obj> {
   table: string;
-  key: Partial<T>;
+  key: Partial<NoInfer<T>>;
   resource?: string;
-  projection?: AllKeys<T>[];
-  filter?: Partial<T>;
+  projection?: AllKeys<NoInfer<T>>[];
+  filter?: Partial<NoInfer<T>>;
 }
 
 export type DbTrxGetResult<R extends DbTrxGetRequest[]> = {
@@ -151,8 +151,8 @@ export type DbTrxGetOrThrowResult<R extends DbTrxGetRequest[]> = {
 export interface DbTrxDeleteRequest<T = Obj> {
   table: string;
   type: "DELETE";
-  key: Partial<T>;
-  condition?: Condition<T>;
+  key: Partial<NoInfer<T>>;
+  condition?: Condition<NoInfer<T>>;
 }
 
 export interface DbTrxPutRequest<T = Obj> {
@@ -165,16 +165,16 @@ export interface DbTrxPutRequest<T = Obj> {
 export interface DbTrxUpdateRequest<T = Obj> {
   table: string;
   type: "UPDATE";
-  key: Partial<T>;
+  key: Partial<NoInfer<T>>;
   update: UpdateExpression<T>;
-  condition?: Condition<T>;
+  condition?: Condition<NoInfer<T>>;
 }
 
 export interface DbTrxConditionRequest<T = Obj> {
   table: string;
   type: "CONDITION";
-  key: Partial<T>;
-  condition: Condition<T>;
+  key: Partial<NoInfer<T>>;
+  condition: Condition<NoInfer<T>>;
 }
 
 export type DbTrxWriteRequest<T = Obj> =

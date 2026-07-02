@@ -1484,3 +1484,57 @@ describe("transformAttributes and computedAttributes types", () => {
     });
   });
 });
+
+describe("raw Db<T> generic inference", () => {
+  interface User {
+    id: string;
+    name: string;
+    age: number;
+    tags: string[];
+  }
+
+  // Without an explicit generic, the key/query must NOT lock T to the key shape —
+  // any item shape should be accepted (T defaults to Obj).
+  test("update accepts arbitrary fields when no generic is given", async () => {
+    await db.update({
+      table: "t",
+      key: { id: "1" },
+      update: { name: "Bob", age: 42, whatever: true },
+      condition: { version: 1 },
+    });
+  });
+
+  test("get/query/scan accept arbitrary projection & filter with no generic", async () => {
+    await db.get({ table: "t", key: { id: "1" }, projection: ["name"], filter: { active: true } });
+    await db.query({
+      table: "t",
+      query: { pk: "a" },
+      startKey: { id: "1" },
+      filter: { name: "x" },
+    });
+    await db.scan({
+      table: "t",
+      startKey: { id: "1" },
+      filter: { name: "x" },
+      projection: ["age"],
+    });
+    await db.delete({ table: "t", key: { id: "1" }, condition: { version: 2 } });
+    await db.batchUpdate({ t: { keys: [{ id: "1" }], update: { name: "Bob", age: 42 } } });
+  });
+
+  // With an explicit generic, the payload is fully typed and non-key fields are allowed.
+  test("explicit generic types the update payload", async () => {
+    await db.update<User>({ table: "t", key: { id: "1" }, update: { name: "Bob", age: 42 } });
+    await db.update<User>({ table: "t", key: { id: "1" }, update: { age: { $plus: 1 } } });
+    await db.update<User>({ table: "t", key: { id: "1" }, update: { tags: { $append: "x" } } });
+  });
+
+  test("explicit generic still rejects unknown fields", async () => {
+    // @ts-expect-error — "nope" is not a field of User
+    await db.update<User>({ table: "t", key: { id: "1" }, update: { nope: 1 } });
+    // @ts-expect-error — "nope" is not a field of User
+    await db.get<User>({ table: "t", key: { id: "1" }, projection: ["nope"] });
+    // @ts-expect-error — "nope" is not a field of User
+    await db.delete<User>({ table: "t", key: { id: "1" }, condition: { nope: 1 } });
+  });
+});
