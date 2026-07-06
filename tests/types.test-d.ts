@@ -1,8 +1,15 @@
 import { Type } from "typebox";
 import { describe, expectTypeOf, test } from "vite-plus/test";
-import { makeRepo, Db, Table } from "../src";
+import { makeRepo, Db, Repo, Table } from "../src";
 import type { Condition, SortKeyOps } from "../src/types";
-import type { RepoGsiStartKey, RepoQueryGsiQuery, RepoUpdateInputFor } from "../src/repo.types";
+import type {
+  RepoGetOptions,
+  RepoGetResult,
+  RepoGsiStartKey,
+  RepoKey,
+  RepoQueryGsiQuery,
+  RepoUpdateInputFor,
+} from "../src/repo.types";
 
 const Schema = Type.Object({
   pk: Type.String(),
@@ -225,6 +232,131 @@ class CatRepo extends makeRepo(catTable) {
   }
 }
 void CatRepo;
+
+// Regression: base methods called via `this` inside a subclass method body must
+// keep full type safety. Before the `Self` type parameter, the polymorphic
+// `this` left the helper types (GsiNames<this>, RepoQueryGsiResult<this,...>,
+// RepoOutput<this>, ...) unreduced inside method bodies, so GSI sort-key fields
+// vanished from the query and result types collapsed away from the item type —
+// even though the identical call from an external caller worked. This exercises
+// a GSI *with* a sort key (so a lost sort key would surface) and asserts result
+// types explicitly (so a collapsed result would surface).
+describe("base methods keep type safety inside subclass method bodies", () => {
+  const Log = Type.Object({
+    id: Type.String(),
+    type: Type.Union([Type.Literal("INFO"), Type.Literal("WARN"), Type.Literal("ERROR")]),
+    time: Type.Number(),
+    message: Type.String(),
+  });
+  type Log = { id: string; type: "INFO" | "WARN" | "ERROR"; time: number; message: string };
+  const logTable = new Table(Log, {
+    name: "logs",
+    partitionKey: "id",
+    gsis: { byTypeAndTime: { partitionKey: "type", sortKey: "time" } },
+  });
+
+  test("queryGsi: sort-key query + result reduce inside a subclass method", () => {
+    class LogRepo extends makeRepo(logTable) {
+      // Explicit Promise<Log[]> return — fails to type-check unless the result
+      // reduces to Log[] (the originally reported error #2).
+      async recent(): Promise<Log[]> {
+        // Using the GSI sort key `time` — dropped by the old unreduced query
+        // type (the originally reported error #1).
+        const rows = await this.queryGsi(
+          "byTypeAndTime",
+          { type: "INFO", time: { $gt: 0 } },
+          { sort: "DESC", limit: 20 },
+        );
+        return rows;
+      }
+      rejectsUnknownGsiField() {
+        // @ts-expect-error — "nope" is not a field on the byTypeAndTime GSI query
+        return this.queryGsi("byTypeAndTime", { type: "INFO", nope: 1 });
+      }
+    }
+    void LogRepo;
+  });
+
+  // getOrThrow and update reduce to exactly the item type; assert with the
+  // strict structural check.
+  test("getOrThrow/update reduce to the item type inside a subclass method", () => {
+    class LogRepo extends makeRepo(logTable) {
+      async ops() {
+        const fetched = await this.getOrThrow({ id: "a" });
+        expectTypeOf(fetched).toEqualTypeOf<Log>();
+
+        const updated = await this.update({ id: "a" }, { message: "hi" });
+        expectTypeOf(updated).toEqualTypeOf<Log>();
+
+        // @ts-expect-error — "nope" is not an updatable field
+        await this.update({ id: "a" }, { nope: 1 });
+      }
+    }
+    void LogRepo;
+  });
+
+  // query/scan/get results are `<conditional>[]` / `<conditional> | undefined`.
+  // They are fully usable (assignable to the concrete item type) but are not
+  // eagerly evaluated to an identical structural form across TS checkers, so a
+  // strict toEqualTypeOf is flaky here. Instead assert the two properties that
+  // regressed before the fix: the element is assignable to the item type (not
+  // collapsed) AND is not `any` (a wrong-typed use still errors).
+  test("query/scan/get stay concrete (not any, not collapsed) inside a subclass method", () => {
+    class LogRepo extends makeRepo(logTable) {
+      async ops() {
+        const listed = await this.query({ id: "a" });
+        const listedItem: Log = listed[0]!; // errors if collapsed (missing fields)
+        // @ts-expect-error — element is Log, not string (would NOT error if `any`)
+        const listedBad: string = listed[0]!;
+
+        const scanned = await this.scan();
+        const scannedItem: Log = scanned[0]!;
+        // @ts-expect-error — element is Log, not string (would NOT error if `any`)
+        const scannedBad: string = scanned[0]!;
+
+        const got = await this.get({ id: "a" });
+        const gotItem: Log | undefined = got; // errors if collapsed
+        // @ts-expect-error — got is Log | undefined, not string (guards against `any`)
+        const gotBad: string = got;
+
+        void [listedItem, listedBad, scannedItem, scannedBad, gotItem, gotBad];
+      }
+    }
+    void LogRepo;
+  });
+
+  // Overriding a generic base method: the base signatures are written against
+  // the internal `Self` param, which a subclass cannot name via `this`. The
+  // `$self` phantom exposes that concrete self-type so an override can be
+  // written with a matching, fully-typed signature.
+  test("generic base methods can be overridden via the $self phantom", () => {
+    type Self = Repo<typeof logTable>["$self"];
+    class LogRepo extends makeRepo(logTable) {
+      override async get<const O extends RepoGetOptions<Self>>(
+        key: RepoKey<Self>,
+        options?: O,
+      ): Promise<RepoGetResult<Self, O>> {
+        return super.get(key, options);
+      }
+    }
+    // Callers still get precise per-call types through the override.
+    const repo = new LogRepo(db);
+    expectTypeOf(repo.get({ id: "a" })).resolves.toEqualTypeOf<Log | undefined>();
+    expectTypeOf(repo.get({ id: "a" }, { projection: ["id", "message"] })).resolves.toEqualTypeOf<
+      Pick<Log, "id" | "message"> | undefined
+    >();
+  });
+
+  // Non-generic base methods override cleanly with a plain `this`-based signature.
+  test("non-generic base methods override with a this-based signature", () => {
+    class LogRepo extends makeRepo(logTable) {
+      override async delete(key: RepoKey<this>) {
+        return super.delete(key);
+      }
+    }
+    void LogRepo;
+  });
+});
 
 const UnionSchema = Type.Union([
   Type.Object({

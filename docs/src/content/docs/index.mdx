@@ -107,7 +107,7 @@ import LinkButton from "~/components/LinkButton.astro";
 
 - Inferred result types
 - Projection narrowing
-- `transformItem` subclass hook
+- `transformOutput` / `computedAttributes` hooks
 - Local DynamoDB friendly
 
 <LinkButton href="/getting-started/introduction/" variant="text" className="mt-6 mb-8 ml-4">
@@ -192,7 +192,7 @@ import Accordion from "~/components/Accordion.astro";
 />
 <Accordion
   question="Can I add computed fields to items?"
-  answer="Yes — subclass `AbstractRepo` and override `transformItem`. Dinah threads the transformed type through every read operation that returns full items."
+  answer="Yes — pass `transformOutput` (map the whole item) or `computedAttributes` (derive a field from others) to `makeRepo(table, config)`. Dinah threads the resulting type through every read operation that returns full items."
   type="setting"
 />
 

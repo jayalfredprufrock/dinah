@@ -199,4 +199,4 @@ This issues a `CreateTable` command with the key schema, GSIs, and billing mode 
 
 ## Default values on write
 
-`TableDef` is purely structural — it doesn't carry write-time hooks. To attach defaults like `createdAt` / `updatedAt` to every write, subclass `AbstractRepo` and override `defaultPutData` / `defaultUpdateData`. See [Subclassing Repos](/guides/subclassing-repos/).
+`TableDef` is purely structural — it doesn't carry write-time hooks. To attach defaults like `createdAt` / `updatedAt` to every write, pass `defaultCreateData` / `defaultUpdateData` to `makeRepo(table, config)` (and extend the result). See [Subclassing Repos](/guides/subclassing-repos/).

@@ -17,7 +17,7 @@ It is closer to a **query builder** than an ORM, and it does not encourage singl
 - **MongoDB-like query syntax.** Operators like `$gt`, `$between`, `$prefix`, `$exists`, `$in`, `$includes`, and a set of update operators (`$plus`, `$append`, `$setAdd`, `$ifNotExists`, …) compile to DynamoDB expressions under the hood.
 - **Batch & transaction support.** `batchGet` / `batchWrite` automatically chunk and retry unprocessed requests. `trxGet` / `trxWrite` support mixed put / update / delete / condition checks.
 - **Pagination.** Every paginating read has an async iterator twin (`queryPaged`, `scanPaged`, `queryGsiPaged`, `scanGsiPaged`).
-- **Repos you can extend.** Subclass `AbstractRepo` to add computed fields via `transformItem`, attach default values via `defaultPutData` / `defaultUpdateData`, or expose custom methods on a typed repo.
+- **Repos you can extend.** Extend `makeRepo(table, config)` to map or derive fields via `transformOutput` / `computedAttributes`, attach default values via `defaultCreateData` / `defaultUpdateData`, or expose custom methods on a typed repo.
 
 ## What Dinah is not
 

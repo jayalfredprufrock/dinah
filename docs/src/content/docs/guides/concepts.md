@@ -66,33 +66,25 @@ await userRepo.put({ userId: "u1", email: "alice@example.com" /* … */ });
 
 See the [`Repo` reference](/reference/repo/) for every method.
 
-### AbstractRepo
+### Subclassing a repo
 
-Under the hood, `Repo` is a concrete implementation of an `AbstractRepo<Table>` base class. You can subclass `AbstractRepo` directly when you want to:
+`db.makeRepo(table)` returns a plain `Repo`. For a named, reusable repo with extra
+behavior, extend the class returned by the standalone `makeRepo(table, config)` and
+add your own methods. The config controls defaults, transforms, computed fields, and
+more. Use this when you want to:
 
-- Add computed fields to returned items (`transformItem`).
-- Set default values on every put (`defaultPutData`).
-- Set default values on every update (`defaultUpdateData`, e.g. `updatedAt`).
+- Map returned items to a richer shape (`transformOutput`) or derive fields (`computedAttributes`).
+- Set default values on every create (`defaultCreateData`) or update (`defaultUpdateData`, e.g. `updatedAt`).
 - Expose custom, domain-specific methods that reuse the repo's typed primitives.
 
 ```typescript
-import { AbstractRepo } from "dinah";
+import { makeRepo } from "dinah";
 
-class UserRepo extends AbstractRepo<typeof UserTable> {
-  readonly table = UserTable;
-
-  override get defaultPutData() {
-    return { createdAt: Date.now() };
-  }
-
-  override get defaultUpdateData() {
-    return { updatedAt: Date.now() };
-  }
-
-  override transformItem(user: User): User & { displayName: string } {
-    return { ...user, displayName: user.name || user.email };
-  }
-
+class UserRepo extends makeRepo(UserTable, {
+  defaultCreateData: () => ({ createdAt: Date.now() }),
+  defaultUpdateData: () => ({ updatedAt: Date.now() }),
+  transformOutput: (user) => ({ ...user, displayName: user.name || user.email }),
+}) {
   async findByEmail(email: string) {
     return this.queryGsi("byEmail", { email });
   }
@@ -110,6 +102,6 @@ Every typed operation in Dinah flows from the typebox schema you pass to `Table`
 1. The `Table`'s schema → the item type.
 2. The `TableDef`'s key configuration → what shape a valid key is.
 3. Any `projection` you pass → which attributes come back.
-4. The subclass's `transformItem` signature → any computed fields.
+4. The config's `transformOutput` / `computedAttributes` → any mapped or derived fields.
 
 There is no runtime reflection — all of this happens at the type level. If you change your schema, every call site that no longer type-checks will light up immediately.

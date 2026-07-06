@@ -77,15 +77,15 @@ get<R = Obj>(data: {
   key: Obj;
   consistent?: boolean;
   projection?: string[];
-  condition?: Obj;
+  filter?: Obj;
 }): Promise<R | undefined>
 ```
 
 Sends a `GetItem` and returns the item, or `undefined` if not found.
 
-- **`condition`** is applied **client-side** with `sift` after the item is fetched. An item that fails the condition is treated as not found.
+- **`filter`** is applied **client-side** as a partial match after the item is fetched. An item that fails the filter is treated as not found.
 - **`projection`** compiles to a DynamoDB projection expression.
-- The generic `R` lets you assert a return shape; prefer using a `Repo` for real inference.
+- The generic `R` lets you assert a return shape; prefer using a `Repo` for real inference. Without a generic, the item shape is unconstrained (defaults to `Obj`).
 
 ### `getOrThrow(data)`
 
@@ -93,7 +93,7 @@ Sends a `GetItem` and returns the item, or `undefined` if not found.
 getOrThrow<R = Obj>(data: DbGet): Promise<R>
 ```
 
-Same as `get`, but throws `Error("Item not found in <table> table.")` when no item is returned.
+Same as `get`, but throws a `DinahError` with `details.type === "NOT_FOUND"` when no item is returned.
 
 ### `put(data)`
 
@@ -235,7 +235,7 @@ Cross-table batch get. Dinah:
 2. Sends `BatchGetCommand`s and collects results.
 3. Re-queues any `UnprocessedKeys` with a progressively smaller batch size, up to 5 retry rounds.
 4. Sorts returned items back into the original input order per table.
-5. Applies any per-table `condition` client-side via `sift`. Items that fail the condition are dropped (not included in `items` or `unprocessed`).
+5. Applies any per-table `filter` client-side as a partial match. Items that fail the filter are dropped (not included in `items` or `unprocessed`).
 6. Returns any still-unprocessed keys after the final retry round on `unprocessed`.
 
 ### `batchGetOrThrow(data)`
@@ -276,10 +276,10 @@ trxGet<R extends DbTrxGetRequest[]>(...requests: R): Promise<DbTrxGetResult<R>>
 Sends a `TransactGetItems` with up to 100 requests. Each request is:
 
 ```typescript
-{ table: string; key: Obj; projection?: string[]; condition?: Obj }
+{ table: string; key: Obj; projection?: string[]; filter?: Obj }
 ```
 
-Returns a tuple-typed array where each slot corresponds to a request. An item that fails its client-side `condition` (via `sift`) becomes `undefined` in the returned tuple.
+Returns a tuple-typed array where each slot corresponds to a request. An item that fails its client-side `filter` (a partial match) becomes `undefined` in the returned tuple.
 
 ### `trxGetOrThrow(...requests)`
 

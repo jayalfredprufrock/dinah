@@ -120,6 +120,43 @@ export interface RepoConfig<
   immutableAttributes?: readonly TImmutable[];
 }
 
+// Concrete reconstruction of this repo's `RepoBase` shape, derived from the
+// class type parameters rather than from `this`. It mirrors the phantom `$*`
+// declarations below. This exists to feed the `Self` type parameter (see the
+// `Repo` class): the helper types in repo.types.ts do indexed-access and
+// conditional lookups (R["$schema"], R["table"]["def"], GsiProjectionType<R>,
+// NarrowByDiscriminator<..., R["$discriminator"]>, ...). Those reduce only when
+// their `R` is bound to concrete types. `this` is a polymorphic type parameter,
+// and TypeScript defers indexed access on a type parameter, so `this`-based
+// helpers never reduce inside a (sub)class method body — even though they do
+// reduce at an external call site where `this` binds to the concrete receiver.
+// The ordinary class params (T, TDiscriminator, ...) ARE bound to concrete
+// types through a subclass's heritage clause, so a `Self` rebuilt from them
+// reduces everywhere, including inside subclass methods like
+// `class LogRepo extends makeRepo(t) { m() { this.queryGsi(...) } }`.
+type RepoSelf<
+  T extends Table,
+  TDefaults extends object,
+  TUpdateDefaults extends object,
+  TOutput,
+  TComputed,
+  TImmutable extends PropertyKey,
+  TDiscriminator extends PropertyKey,
+> = {
+  readonly $schema: ExtractTableSchema<T>;
+  readonly $def: ExtractTableDef<T>;
+  readonly $computedAttributes: keyof TComputed;
+  readonly $immutableAttributes: TImmutable;
+  readonly $discriminator: TDiscriminator;
+  readonly table: T;
+  readonly defaultCreateData: TDefaults;
+  readonly defaultUpdateData: TUpdateDefaults;
+  // Mirrors the class method's real signature. The param must NOT be `never`
+  // (as in the RepoBase constraint): `ReturnType<(x: never) => R>` resolves to
+  // `any`, which would poison RepoOutput<Self> and every result type built on it.
+  transformOutput(item: ExtractTableSchema<T>): TOutput;
+};
+
 export class Repo<
   T extends Table,
   TDefaults extends Partial<ExtractTableSchema<T>> = {},
@@ -128,7 +165,34 @@ export class Repo<
   TComputed extends ValidComputedMap<ExtractTableSchema<T>, TComputed> = {},
   TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
   TDiscriminator extends keyof ExtractTableSchema<T> = never,
+  // Synthetic, never passed explicitly. Bound to its default at every use site;
+  // because the default is built from the params above (concrete in a subclass
+  // heritage clause), method signatures written against `Self` reduce inside
+  // subclass method bodies where `this`-based ones do not. See RepoSelf above.
+  Self extends RepoBase = RepoSelf<
+    T,
+    TDefaults,
+    TUpdateDefaults,
+    TOutput,
+    TComputed,
+    TImmutable,
+    TDiscriminator
+  >,
 > {
+  // Concrete self-type (the `Self` reconstruction) exposed as a phantom so it
+  // can be named when authoring an override. Base method signatures are written
+  // against `Self`, which a subclass cannot name via `this` (and `this` would
+  // not reduce inside a method body anyway). To override a generic base method,
+  // write its signature against `<BaseRepoType>["$self"]`, e.g.:
+  //   class LogRepo extends makeRepo(logTable) {
+  //     override async get<const O extends RepoGetOptions<Repo<typeof logTable>["$self"]>>(
+  //       key: RepoKey<Repo<typeof logTable>["$self"]>, options?: O,
+  //     ): Promise<RepoGetResult<Repo<typeof logTable>["$self"], O>> {
+  //       return super.get(key, options);
+  //     }
+  //   }
+  declare readonly $self: Self;
+
   // these phantom properties are used to pre-compute types derived from T
   // which allows easy lookups using the "this" Repo type
   declare readonly $schema: ExtractTableSchema<T>;
@@ -195,23 +259,23 @@ export class Repo<
 
   // TODO: should this throw if pk is missing?
   // should return type by narrower?
-  extractKey(item: RepoKey<this>): RepoKey<this> {
+  extractKey(item: RepoKey<Self>): RepoKey<Self> {
     const { partitionKey, sortKey } = this.table.def;
     if (sortKey) {
       return {
-        [partitionKey]: item[partitionKey as keyof RepoKey<this>],
-        [sortKey]: item[sortKey as keyof RepoKey<this>],
-      } as RepoKey<this>;
+        [partitionKey]: item[partitionKey as keyof RepoKey<Self>],
+        [sortKey]: item[sortKey as keyof RepoKey<Self>],
+      } as RepoKey<Self>;
     }
 
-    return { [partitionKey]: item[partitionKey as keyof RepoKey<this>] } as RepoKey<this>;
+    return { [partitionKey]: item[partitionKey as keyof RepoKey<Self>] } as RepoKey<Self>;
   }
 
-  async get<const O extends RepoGetOptions<this>>(
-    key: RepoKey<this>,
+  async get<const O extends RepoGetOptions<Self>>(
+    key: RepoKey<Self>,
     options?: O,
-  ): Promise<RepoGetResult<this, O>> {
-    const { filter, ...restOptions } = (options ?? {}) as RepoGetOptions<this>;
+  ): Promise<RepoGetResult<Self, O>> {
+    const { filter, ...restOptions } = (options ?? {}) as RepoGetOptions<Self>;
     const item = await this.db.get({
       table: this.tableName,
       key: this.extractKey(key),
@@ -221,11 +285,11 @@ export class Repo<
     return (item && this.applyTransformIfNeeded(item, options)) as any;
   }
 
-  async getOrThrow<const O extends RepoGetOptions<this>>(
-    key: RepoKey<this>,
+  async getOrThrow<const O extends RepoGetOptions<Self>>(
+    key: RepoKey<Self>,
     options?: O,
-  ): Promise<RepoGetOrThrowResult<this, O>> {
-    const { filter, ...restOptions } = (options ?? {}) as RepoGetOptions<this>;
+  ): Promise<RepoGetOrThrowResult<Self, O>> {
+    const { filter, ...restOptions } = (options ?? {}) as RepoGetOptions<Self>;
     const item = await this.db.getOrThrow({
       table: this.tableName,
       key: this.extractKey(key),
@@ -236,10 +300,10 @@ export class Repo<
     return this.applyTransformIfNeeded(item, options) as any;
   }
 
-  async put<const T extends RepoPutItem<this>>(
+  async put<const T extends RepoPutItem<Self>>(
     item: T,
-    options?: RepoPutOptions<this>,
-  ): Promise<RepoPutResult<this, T>> {
+    options?: RepoPutOptions<Self>,
+  ): Promise<RepoPutResult<Self, T>> {
     const result = await this.db.put({
       table: this.tableName,
       item: item as any,
@@ -249,11 +313,11 @@ export class Repo<
     return this.applyTransformIfNeeded(result) as any;
   }
 
-  async update<const K extends RepoKey<this>>(
+  async update<const K extends RepoKey<Self>>(
     key: K,
-    update: RepoUpdateInputFor<this, K>,
-    options?: RepoUpdateOptions<this>,
-  ): Promise<RepoUpdateResult<this>> {
+    update: RepoUpdateInputFor<Self, K>,
+    options?: RepoUpdateOptions<Self>,
+  ): Promise<RepoUpdateResult<Self>> {
     const updateWithDefaults = this.applyNormalizersToExpression(update as Obj);
     const result = await this.db.update({
       table: this.tableName,
@@ -266,7 +330,7 @@ export class Repo<
     return this.applyTransformIfNeeded(result);
   }
 
-  async create<const T extends RepoCreateItem<this>>(item: T): Promise<RepoCreateResult<this, T>> {
+  async create<const T extends RepoCreateItem<Self>>(item: T): Promise<RepoCreateResult<Self, T>> {
     const condition = { $and: [{ [this.table.def.partitionKey]: { $exists: false } }] } as any;
 
     const normalizedItem = this.applyCreateTransforms(item as Obj);
@@ -286,7 +350,7 @@ export class Repo<
         throw new DinahError(
           {
             type: "ALREADY_EXISTS",
-            key: this.extractKey(item as RepoKey<this>) as Record<string, unknown>,
+            key: this.extractKey(item as unknown as RepoKey<Self>) as Record<string, unknown>,
             resource: this.resourceName,
           },
           { cause: err },
@@ -298,9 +362,9 @@ export class Repo<
   }
 
   async delete(
-    key: RepoKey<this>,
-    options?: RepoDeleteOptions<this>,
-  ): Promise<RepoDeleteResult<this>> {
+    key: RepoKey<Self>,
+    options?: RepoDeleteOptions<Self>,
+  ): Promise<RepoDeleteResult<Self>> {
     const item = await this.db.delete({
       table: this.tableName,
       key: this.extractKey(key),
@@ -311,9 +375,9 @@ export class Repo<
   }
 
   async deleteOrThrow(
-    key: RepoKey<this>,
-    options?: RepoDeleteOptions<this>,
-  ): Promise<RepoDeleteOrThrowResult<this>> {
+    key: RepoKey<Self>,
+    options?: RepoDeleteOptions<Self>,
+  ): Promise<RepoDeleteOrThrowResult<Self>> {
     const item = await this.db.deleteOrThrow({
       table: this.tableName,
       key: this.extractKey(key),
@@ -323,18 +387,18 @@ export class Repo<
     return this.applyTransformIfNeeded(item);
   }
 
-  async query<const O extends RepoQueryOptions<this>>(
-    query: RepoQueryQuery<this>,
+  async query<const O extends RepoQueryOptions<Self>>(
+    query: RepoQueryQuery<Self>,
     options?: O,
-  ): Promise<RepoQueryResult<this, O>> {
+  ): Promise<RepoQueryResult<Self, O>> {
     const items = await this.db.query({ table: this.tableName, query, ...options } as any);
     return this.applyTransformsIfNeeded(items, options) as any;
   }
 
-  async *queryPaged<const O extends RepoQueryOptions<this>>(
-    query: RepoQueryQuery<this>,
+  async *queryPaged<const O extends RepoQueryOptions<Self>>(
+    query: RepoQueryQuery<Self>,
     options?: O,
-  ): RepoQueryPagedResult<this, O> {
+  ): RepoQueryPagedResult<Self, O> {
     for await (const page of this.db.queryPaged({
       table: this.tableName,
       query,
@@ -344,11 +408,11 @@ export class Repo<
     }
   }
 
-  async queryGsi<G extends GsiNames<this>, const O extends RepoQueryGsiOptions<this, T, G>>(
+  async queryGsi<G extends GsiNames<Self>, const O extends RepoQueryGsiOptions<Self, T, G>>(
     gsi: G,
     query: RepoQueryGsiQuery<T, G>,
     options?: O,
-  ): Promise<RepoQueryGsiResult<this, O, G>> {
+  ): Promise<RepoQueryGsiResult<Self, O, G>> {
     const items = await this.db.query({
       table: this.tableName,
       index: gsi,
@@ -358,11 +422,11 @@ export class Repo<
     return this.applyTransformsIfNeeded(items, { ...options, gsi }) as any;
   }
 
-  async *queryGsiPaged<G extends GsiNames<this>, const O extends RepoQueryGsiOptions<this, T, G>>(
+  async *queryGsiPaged<G extends GsiNames<Self>, const O extends RepoQueryGsiOptions<Self, T, G>>(
     gsi: G,
     query: RepoQueryGsiQuery<T, G>,
     options?: O,
-  ): RepoQueryGsiPagedResult<this, O, G> {
+  ): RepoQueryGsiPagedResult<Self, O, G> {
     for await (const page of this.db.queryPaged({
       table: this.tableName,
       index: gsi,
@@ -373,12 +437,12 @@ export class Repo<
     }
   }
 
-  async getGsi<G extends GsiNames<this>, const O extends RepoGetGsiOptions<this, T, G>>(
+  async getGsi<G extends GsiNames<Self>, const O extends RepoGetGsiOptions<Self, T, G>>(
     gsi: G,
     query: RepoQueryGsiQuery<T, G>,
     options?: O,
-  ): Promise<RepoGetGsiResult<this, O, G>> {
-    const { filter, ...restOptions } = (options ?? {}) as RepoGetGsiOptions<this, T, G>;
+  ): Promise<RepoGetGsiResult<Self, O, G>> {
+    const { filter, ...restOptions } = (options ?? {}) as RepoGetGsiOptions<Self, T, G>;
     const items = await this.db.query({
       table: this.tableName,
       index: gsi,
@@ -397,11 +461,11 @@ export class Repo<
     return this.applyTransformIfNeeded(item, { ...options, gsi }) as any;
   }
 
-  async getGsiOrThrow<G extends GsiNames<this>, const O extends RepoGetGsiOptions<this, T, G>>(
+  async getGsiOrThrow<G extends GsiNames<Self>, const O extends RepoGetGsiOptions<Self, T, G>>(
     gsi: G,
     query: RepoQueryGsiQuery<T, G>,
     options?: O,
-  ): Promise<RepoGetGsiOrThrowResult<this, O, G>> {
+  ): Promise<RepoGetGsiOrThrowResult<Self, O, G>> {
     const item = await this.getGsi(gsi, query, options);
     if (item === undefined) {
       throw new DinahError({
@@ -413,31 +477,31 @@ export class Repo<
     return item as any;
   }
 
-  async scan<const O extends RepoScanOptions<this>>(options?: O): Promise<RepoScanResult<this, O>> {
+  async scan<const O extends RepoScanOptions<Self>>(options?: O): Promise<RepoScanResult<Self, O>> {
     const items = await this.db.scan({ table: this.tableName, ...options });
     return this.applyTransformsIfNeeded(items, options) as any;
   }
 
-  async *scanPaged<const O extends RepoScanOptions<this>>(
+  async *scanPaged<const O extends RepoScanOptions<Self>>(
     options?: O,
-  ): RepoScanPagedResult<this, O> {
+  ): RepoScanPagedResult<Self, O> {
     for await (const page of this.db.scanPaged({ table: this.tableName, ...options })) {
       yield this.applyTransformsIfNeeded(page, options) as any;
     }
   }
 
-  async scanGsi<G extends GsiNames<this>, const O extends RepoScanGsiOptions<this, T, G>>(
+  async scanGsi<G extends GsiNames<Self>, const O extends RepoScanGsiOptions<Self, T, G>>(
     gsi: G,
     options?: O,
-  ): Promise<RepoScanGsiResult<this, O, G>> {
+  ): Promise<RepoScanGsiResult<Self, O, G>> {
     const items = await this.db.scan({ table: this.tableName, index: gsi, ...options } as any);
     return this.applyTransformsIfNeeded(items, { ...options, gsi }) as any;
   }
 
-  async *scanGsiPaged<G extends GsiNames<this>, const O extends RepoScanGsiOptions<this, T, G>>(
+  async *scanGsiPaged<G extends GsiNames<Self>, const O extends RepoScanGsiOptions<Self, T, G>>(
     gsi: G,
     options?: O,
-  ): RepoScanGsiPagedResult<this, O, G> {
+  ): RepoScanGsiPagedResult<Self, O, G> {
     for await (const page of this.db.scanPaged({
       table: this.tableName,
       index: gsi,
@@ -447,7 +511,7 @@ export class Repo<
     }
   }
 
-  async exists(options?: RepoExistsOptions<this>): Promise<boolean> {
+  async exists(options?: RepoExistsOptions<Self>): Promise<boolean> {
     return this.db.exists({
       table: this.tableName,
       projection: [this.table.def.partitionKey] as any,
@@ -455,7 +519,7 @@ export class Repo<
     });
   }
 
-  async existsGsi(gsi: GsiNames<this>, options?: RepoExistsOptions<this>): Promise<boolean> {
+  async existsGsi(gsi: GsiNames<Self>, options?: RepoExistsOptions<Self>): Promise<boolean> {
     return this.db.exists({
       table: this.tableName,
       index: gsi,
@@ -464,11 +528,11 @@ export class Repo<
     });
   }
 
-  async batchGet<const O extends RepoBatchGetOptions<this>>(
-    keys: RepoKey<this>[],
+  async batchGet<const O extends RepoBatchGetOptions<Self>>(
+    keys: RepoKey<Self>[],
     options?: O,
-  ): Promise<RepoBatchGetResult<this, O>> {
-    const { filter, ...restOptions } = (options ?? {}) as RepoBatchGetOptions<this>;
+  ): Promise<RepoBatchGetResult<Self, O>> {
+    const { filter, ...restOptions } = (options ?? {}) as RepoBatchGetOptions<Self>;
     const { items, unprocessed } = await this.db.batchGet({
       [this.tableName]: {
         keys: keys.map((key) => this.extractKey(key)),
@@ -479,15 +543,15 @@ export class Repo<
     const tableItems = items[this.tableName];
     return {
       items: (tableItems && this.applyTransformsIfNeeded(tableItems, options)) as any,
-      unprocessed: unprocessed?.[this.tableName]?.keys as RepoKey<this>[] | undefined,
+      unprocessed: unprocessed?.[this.tableName]?.keys as RepoKey<Self>[] | undefined,
     };
   }
 
-  async batchGetOrThrow<const O extends RepoBatchGetOptions<this>>(
-    keys: RepoKey<this>[],
+  async batchGetOrThrow<const O extends RepoBatchGetOptions<Self>>(
+    keys: RepoKey<Self>[],
     options?: O,
-  ): Promise<RepoBatchGetOrThrowResult<this, O>> {
-    const { filter, ...restOptions } = (options ?? {}) as RepoBatchGetOptions<this>;
+  ): Promise<RepoBatchGetOrThrowResult<Self, O>> {
+    const { filter, ...restOptions } = (options ?? {}) as RepoBatchGetOptions<Self>;
     const result = await this.db.batchGetOrThrow({
       [this.tableName]: {
         keys: keys.map((key) => this.extractKey(key)),
@@ -499,7 +563,7 @@ export class Repo<
     return this.applyTransformsIfNeeded(result[this.tableName] ?? [], options) as any;
   }
 
-  async batchWrite(requests: RepoBatchWrite<this>): Promise<RepoBatchWriteResult<this>> {
+  async batchWrite(requests: RepoBatchWrite<Self>): Promise<RepoBatchWriteResult<Self>> {
     const { items, unprocessed } = await this.db.batchWrite({
       [this.tableName]: requests.map((request) => {
         if (request.type === "DELETE") {
@@ -513,13 +577,13 @@ export class Repo<
     return {
       items: items[this.tableName],
       unprocessed: unprocessed?.[this.tableName],
-    } as RepoBatchWriteResult<this>;
+    } as RepoBatchWriteResult<Self>;
   }
 
   async batchUpdate(
-    keys: RepoKey<this>[],
-    update: RepoUpdateInput<this>,
-  ): Promise<RepoBatchUpdateResult<this>> {
+    keys: RepoKey<Self>[],
+    update: RepoUpdateInput<Self>,
+  ): Promise<RepoBatchUpdateResult<Self>> {
     const updateWithDefaults = this.applyNormalizersToExpression(update as Obj);
     const result = await this.db.batchUpdate({
       [this.tableName]: {
@@ -528,15 +592,15 @@ export class Repo<
       },
     } as any);
     return {
-      unprocessed: result.unprocessed?.[this.tableName]?.keys as RepoKey<this>[] | undefined,
+      unprocessed: result.unprocessed?.[this.tableName]?.keys as RepoKey<Self>[] | undefined,
     };
   }
 
-  async trxGet<const O extends RepoTrxGetOptions<this>>(
-    keys: RepoKey<this>[],
+  async trxGet<const O extends RepoTrxGetOptions<Self>>(
+    keys: RepoKey<Self>[],
     options?: O,
-  ): Promise<RepoTrxGetResult<this, O>> {
-    const { filter, ...restOptions } = (options ?? {}) as RepoTrxGetOptions<this>;
+  ): Promise<RepoTrxGetResult<Self, O>> {
+    const { filter, ...restOptions } = (options ?? {}) as RepoTrxGetOptions<Self>;
     const items = await this.db.trxGet(
       ...keys.map(
         (key) =>
@@ -551,11 +615,11 @@ export class Repo<
     return items.map((item: any) => item && this.applyTransformIfNeeded(item, options)) as any;
   }
 
-  async trxGetOrThrow<const O extends RepoTrxGetOptions<this>>(
-    keys: RepoKey<this>[],
+  async trxGetOrThrow<const O extends RepoTrxGetOptions<Self>>(
+    keys: RepoKey<Self>[],
     options?: O,
-  ): Promise<RepoTrxGetOrThrowResult<this, O>> {
-    const { filter, ...restOptions } = (options ?? {}) as RepoTrxGetOptions<this>;
+  ): Promise<RepoTrxGetOrThrowResult<Self, O>> {
+    const { filter, ...restOptions } = (options ?? {}) as RepoTrxGetOptions<Self>;
     const items = await this.db.trxGetOrThrow(
       ...keys.map(
         (key) =>
@@ -571,7 +635,7 @@ export class Repo<
     return this.applyTransformsIfNeeded(items, options) as any;
   }
 
-  async trxWrite(...requests: RepoTrxWriteRequest<this>[]): Promise<void> {
+  async trxWrite(...requests: RepoTrxWriteRequest<Self>[]): Promise<void> {
     await this.db.trxWrite(
       ...requests.map((request) => {
         switch (request.type) {
@@ -594,7 +658,7 @@ export class Repo<
             const { key, update, ...options } = request;
             return this.trxUpdateRequest(
               key,
-              update as RepoUpdateInputFor<this, typeof key>,
+              update as RepoUpdateInputFor<Self, typeof key>,
               options,
             );
           }
@@ -606,46 +670,46 @@ export class Repo<
     );
   }
 
-  async trxDelete(keys: RepoKey<this>[], options?: RepoDeleteOptions<this>): Promise<void> {
+  async trxDelete(keys: RepoKey<Self>[], options?: RepoDeleteOptions<Self>): Promise<void> {
     return this.db.trxWrite(...keys.map((key) => this.trxDeleteRequest(key, options)));
   }
 
   // todo: return items
-  async trxPut(items: RepoPutItem<this>[], options?: RepoPutOptions<this>): Promise<void> {
+  async trxPut(items: RepoPutItem<Self>[], options?: RepoPutOptions<Self>): Promise<void> {
     return this.db.trxWrite(...items.map((item) => this.trxPutRequest(item, options)));
   }
 
   async trxUpdate(
-    keys: RepoKey<this>[],
-    update: RepoUpdateInput<this>,
-    options?: RepoUpdateOptions<this>,
+    keys: RepoKey<Self>[],
+    update: RepoUpdateInput<Self>,
+    options?: RepoUpdateOptions<Self>,
   ): Promise<void> {
     return this.db.trxWrite(
       ...keys.map((key) =>
-        this.trxUpdateRequest(key, update as RepoUpdateInputFor<this, typeof key>, options),
+        this.trxUpdateRequest(key, update as RepoUpdateInputFor<Self, typeof key>, options),
       ),
     );
   }
 
   // todo: return items
-  async trxCreate(items: RepoCreateItem<this>[]): Promise<void> {
+  async trxCreate(items: RepoCreateItem<Self>[]): Promise<void> {
     return this.db.trxWrite(...items.map((item) => this.trxCreateRequest(item)));
   }
 
-  trxGetRequest<O extends RepoGetOptions<this>>(
-    key: RepoKey<this>,
+  trxGetRequest<O extends RepoGetOptions<Self>>(
+    key: RepoKey<Self>,
     options?: O,
-  ): DbTrxGetRequest<RepoGetOrThrowResult<this, O>> {
+  ): DbTrxGetRequest<RepoGetOrThrowResult<Self, O>> {
     return { table: this.tableName, key: this.extractKey(key), ...options } as any;
   }
 
-  trxDeleteRequest(key: RepoKey<this>, options?: RepoDeleteOptions<this>): DbTrxWriteRequest {
+  trxDeleteRequest(key: RepoKey<Self>, options?: RepoDeleteOptions<Self>): DbTrxWriteRequest {
     return { table: this.tableName, type: "DELETE", key: this.extractKey(key), ...options };
   }
 
   trxConditionRequest(
-    key: RepoKey<this>,
-    condition: Condition<this["$schema"]>,
+    key: RepoKey<Self>,
+    condition: Condition<Self["$schema"]>,
   ): DbTrxWriteRequest {
     return {
       table: this.tableName,
@@ -655,14 +719,14 @@ export class Repo<
     };
   }
 
-  trxPutRequest(item: RepoPutItem<this>, options?: RepoPutOptions<this>): DbTrxWriteRequest {
+  trxPutRequest(item: RepoPutItem<Self>, options?: RepoPutOptions<Self>): DbTrxWriteRequest {
     return { table: this.tableName, type: "PUT", item: item as any, ...options };
   }
 
-  trxUpdateRequest<const K extends RepoKey<this>>(
+  trxUpdateRequest<const K extends RepoKey<Self>>(
     key: K,
-    update: RepoUpdateInputFor<this, K>,
-    options?: RepoUpdateOptions<this>,
+    update: RepoUpdateInputFor<Self, K>,
+    options?: RepoUpdateOptions<Self>,
   ): DbTrxWriteRequest {
     const updateWithDefaults = this.applyNormalizersToExpression(update as Obj);
     return {
@@ -675,7 +739,7 @@ export class Repo<
     };
   }
 
-  trxCreateRequest(item: RepoCreateItem<this>): DbTrxWriteRequest {
+  trxCreateRequest(item: RepoCreateItem<Self>): DbTrxWriteRequest {
     const condition = { $and: [{ [this.table.def.partitionKey]: { $exists: false } }] } as any;
 
     const normalizedItem = this.applyCreateTransforms(item as Obj);

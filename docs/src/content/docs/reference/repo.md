@@ -1,13 +1,11 @@
 ---
 title: Repo
-description: Complete method reference for Repo and AbstractRepo.
+description: Complete method reference for Repo.
 sidebar:
   order: 2
 ---
 
-`Repo<T>` is the typed facade over `Db` for a specific `Table`. It inherits every method from `AbstractRepo<T>` and adds nothing of its own — the only difference is that `Repo` requires you to pass the table at construction, while `AbstractRepo` is meant to be subclassed with `readonly table = ...`.
-
-Every method below is inherited by any subclass of `AbstractRepo`.
+`Repo<T>` is the typed facade over `Db` for a specific `Table`. Get one inline with `db.makeRepo(table)`, or extend the class returned by the standalone `makeRepo(table, config)` to add defaults, transforms, and domain methods (see [Subclassing Repos](/guides/subclassing-repos/)).
 
 ```typescript
 const userRepo = db.makeRepo(UserTable);
@@ -18,30 +16,28 @@ const userRepo = new Repo(db, UserTable);
 ## Constructor
 
 ```typescript
-new Repo<T extends Table>(db: Db, table: T)
+new Repo<T extends Table>(db: Db, table: T, config?: RepoConfig)
 ```
 
-For subclasses:
-
-```typescript
-abstract class AbstractRepo<T extends Table> {
-  constructor(db: Db);
-  abstract readonly table: T;
-}
-```
+`db.makeRepo(table, config?)` and `makeRepo(table, config?)` both wrap this constructor. See [Subclassing Repos](/guides/subclassing-repos/) for every `RepoConfig` field.
 
 ## Properties
 
 - **`db: Db`** — the `Db` instance this repo was constructed with.
 - **`table: T`** — the `Table` this repo operates on.
 - **`tableName: string`** — the effective table name, `${db.config?.tableNamePrefix ?? ""}${table.def.name}`. Used by every method that talks to DynamoDB.
-- **`defaultPutData`** _(overridable)_ — partial item merged under every `put` / `create` / `trxPut` / `trxCreate`. Default: `{}`.
-- **`defaultUpdateData`** _(overridable)_ — partial update merged under every `update` / `trxUpdate`. Default: `{}`.
+- **`resourceName: string`** — label used in thrown `DinahError`s. Defaults to the class name without the `Repo` suffix, else the table name; override with the `resourceName` config field.
+- **`defaultCreateData`** — partial item from the config's `defaultCreateData()`, merged under every `create` / `trxCreate`. Default: `{}`.
+- **`defaultUpdateData`** — partial update from the config's `defaultUpdateData()`, merged under every `update` / `batchUpdate` / `trxUpdate`. Default: `{}`.
 
-## Overridable hooks
+## Config-driven behavior
 
-- **`transformItem(item)`** — called on every item returned by a non-projected read. Override to add computed fields. See [Subclassing Repos](/guides/subclassing-repos/).
-- **`extractKey(item)`** — extracts the primary key from an item-like value. Override only if you need custom key derivation (rare).
+Configured via `RepoConfig` (see [Subclassing Repos](/guides/subclassing-repos/)):
+
+- **`transformOutput`** — maps each item returned by a non-projected read to a richer shape.
+- **`computedAttributes`** — derives fields from other fields on `create` / `update`.
+- **`transformAttributes`** — per-field input normalizers on `create` / `update`.
+- **`extractKey(item)`** — a method (not config) that extracts the primary key from an item-like value; called automatically by every keyed operation, so passing a whole item is safe.
 
 ## Reads
 
@@ -51,15 +47,15 @@ abstract class AbstractRepo<T extends Table> {
 get(key, options?: {
   consistent?: boolean;
   projection?: Projection;
-  condition?: Obj;
+  filter?: Partial<Item>;
 }): Promise<Item | undefined>
 ```
 
 Fetches a single item by primary key. `key` must include the table's partition key (and sort key, if the table has one); any other properties are ignored after `extractKey` runs, so it's safe to pass an entire item.
 
 - **`consistent`** — `true` performs a strongly consistent read.
-- **`projection`** — narrows the return type to `Pick<Item, P>`. Transform is skipped.
-- **`condition`** — client-side `sift` condition. A non-matching item becomes `undefined`.
+- **`projection`** — narrows the return type to `Pick<Item, P>`. `transformOutput` is skipped.
+- **`filter`** — a client-side partial match. A non-matching item becomes `undefined`.
 
 ### `getOrThrow(key, options?)`
 
@@ -206,20 +202,20 @@ Same as `exists`, but targets a named GSI.
 ### `put(item, options?)`
 
 ```typescript
-put(item: PutItem, options?: { condition?: Obj }): Promise<Item>
+put(item: PutItem, options?: { condition?: Condition }): Promise<Item>
 ```
 
-Puts an item. `defaultPutData` is merged **under** `item` (caller wins on conflict). Returns the put item (with defaults applied and `transformItem` applied).
+Puts (upserts) an item as-is. `put` is a raw write: it does **not** apply `defaultCreateData`, `transformAttributes`, or `computedAttributes` — use `create` for those. `transformOutput` is applied to the returned item.
 
 - **`condition`** is added to the `PutItem` request.
 
 ### `create(item, options?)`
 
 ```typescript
-create(item: PutItem): Promise<Item>
+create(item: CreateItem): Promise<Item>
 ```
 
-Like `put`, but fails if an item with the same primary key already exists. Dinah adds a `{ [partitionKey]: { $exists: false } }` condition.
+Like `put`, but fails if an item with the same primary key already exists (Dinah adds a `{ [partitionKey]: { $exists: false } }` condition). Unlike `put`, `create` **applies** `defaultCreateData`, `transformAttributes`, and `computedAttributes`; computed-attribute keys may not be supplied by the caller.
 
 When the primary key is already in use, `create` throws a `DinahError` with `details.type === "ALREADY_EXISTS"`, distinct from the `CONDITIONAL_CHECK_FAILED` raised by `put`/`update`/`delete` condition failures.
 
@@ -233,7 +229,7 @@ update(
 ): Promise<Item>
 ```
 
-Runs an `UpdateItem` and returns the new item. `defaultUpdateData` is merged under `update`. See [Update Operators](/guides/update-operators/) for `update` syntax.
+Runs an `UpdateItem` and returns the new item. `defaultUpdateData`, `transformAttributes`, and `computedAttributes` are applied. See [Update Operators](/guides/update-operators/) for `update` syntax.
 
 Dinah implicitly adds `$exists: true` checks for every primary key attribute, so updating a non-existent key fails rather than silently upserting.
 
@@ -261,14 +257,14 @@ Same as `delete`, but throws if no item was deleted.
 batchGet(keys: Key[], options?: {
   consistent?: boolean;
   projection?: Projection;
-  condition?: Obj;
+  filter?: Partial<Item>;
 }): Promise<{
   items: Item[];
   unprocessed?: Key[];
 }>
 ```
 
-Batch-fetches up to any number of items — Dinah chunks and retries under the hood (see [`Db.batchGet`](/reference/db/#batchgetdata)). Results preserve input order. The `condition` option is applied client-side via `sift`.
+Batch-fetches up to any number of items — Dinah chunks and retries under the hood (see [`Db.batchGet`](/reference/db/#batchgetdata)). Results preserve input order. The `filter` option is applied client-side as a partial match.
 
 ### `batchGetOrThrow(keys, options?)`
 
@@ -290,7 +286,7 @@ batchWrite(requests: Array<
 }>
 ```
 
-Mixes put and delete requests for a single table. `defaultPutData` is merged into every put. See [Batch & Transactions](/guides/batch-and-transactions/#batch-writes) for retry semantics.
+Mixes put and delete requests for a single table. Puts are raw writes (no `defaultCreateData` / input transforms). See [Batch & Transactions](/guides/batch-and-transactions/#batch-writes) for retry semantics.
 
 ## Transactions
 
@@ -299,7 +295,7 @@ Mixes put and delete requests for a single table. `defaultPutData` is merged int
 ```typescript
 trxGet(keys: Key[], options?: {
   projection?: Projection;
-  condition?: Obj;
+  filter?: Partial<Item>;
 }): Promise<Array<Item | undefined>>
 ```
 
@@ -324,7 +320,7 @@ trxWrite(...requests: Array<
 >): Promise<void>
 ```
 
-Bundles multiple writes against this table into a single `TransactWriteItems`. All-or-nothing; up to 100 operations. `defaultPutData` / `defaultUpdateData` are applied to `PUT` / `UPDATE` requests respectively.
+Bundles multiple writes against this table into a single `TransactWriteItems`. All-or-nothing; up to 100 operations. `defaultUpdateData` (plus input transforms / computed attributes) is applied to `UPDATE` requests; `PUT` requests are raw (use `CREATE` semantics via `trxCreate` / `trxCreateRequest` for defaults).
 
 ### Bulk transaction helpers
 
@@ -360,7 +356,7 @@ await db.trxWrite(
 );
 ```
 
-Each builder fills in `table: this.tableName` automatically, merges defaults, and wraps the request in the correct discriminated-union shape for `db.trxWrite` / `db.trxGet`.
+Each builder fills in `table: this.tableName` automatically, applies the relevant defaults/transforms (`trxUpdateRequest` and `trxCreateRequest`), and wraps the request in the correct discriminated-union shape for `db.trxWrite` / `db.trxGet`.
 
 ## Utilities
 

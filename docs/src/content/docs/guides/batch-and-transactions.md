@@ -51,9 +51,9 @@ items.users; // Obj[]
 items.posts; // Obj[]
 ```
 
-### Client-side conditions
+### Client-side filters
 
-Both `db.batchGet` and `repo.batchGet` accept an optional `condition` option. Because DynamoDB itself doesn't support conditional expressions on `BatchGetItem`, Dinah applies the condition **client-side** using [`sift`](https://github.com/crcn/sift.js). Items that fail the condition are silently dropped — they appear neither in `items` nor in `unprocessed`.
+Both `db.batchGet` and `repo.batchGet` accept an optional `filter` option. Because DynamoDB itself doesn't support filter expressions on `BatchGetItem`, Dinah applies the filter **client-side** as a partial match. Items that fail the filter are silently dropped — they appear neither in `items` nor in `unprocessed`.
 
 ## Batch writes
 

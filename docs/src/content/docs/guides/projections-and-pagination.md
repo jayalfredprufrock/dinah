@@ -22,17 +22,17 @@ narrow?.body; // type error: Property 'body' does not exist
 
 Projections work across `get`, `getOrThrow`, `query`, `queryPaged`, `scan`, `scanPaged`, `queryGsi`, `scanGsi`, `batchGet`, `batchGetOrThrow`, `trxGet`, and `trxGetOrThrow`.
 
-### Projections and `transformItem`
+### Projections and `transformOutput`
 
-If your Repo subclass overrides `transformItem` to add computed fields, projected reads **skip** the transform — Dinah has no guarantee that the transform's input fields are present. The narrowed return type reflects the raw `Pick<Schema, ...>` in that case, not the transformed shape.
+If your repo config sets `transformOutput` to map returned items, projected reads **skip** the transform — Dinah has no guarantee that the transform's input fields are present. The narrowed return type reflects the raw `Pick<Schema, ...>` in that case, not the transformed shape.
 
 ### GSI projections
 
 GSIs have their own projection setting (`ALL`, `KEYS_ONLY`, or `INCLUDE`) that determines which attributes DynamoDB will return _regardless_ of what you request. Dinah combines this with your explicit `projection`:
 
 - **`ALL`** (default) — the full item type flows through. A `projection` option narrows further.
-- **`KEYS_ONLY`** — the return type is `Pick<Schema, TableKeys | GsiKeys>` and `transformItem` is skipped.
-- **`INCLUDE`** (an array) — the return type is `Pick<Schema, TableKeys | GsiKeys | IncludedAttrs>` and `transformItem` is skipped.
+- **`KEYS_ONLY`** — the return type is `Pick<Schema, TableKeys | GsiKeys>` and `transformOutput` is skipped.
+- **`INCLUDE`** (an array) — the return type is `Pick<Schema, TableKeys | GsiKeys | IncludedAttrs>` and `transformOutput` is skipped.
 
 See [Defining Tables → GSIs](/guides/defining-tables/#projection-types) for examples.
 

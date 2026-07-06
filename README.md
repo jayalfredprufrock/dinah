@@ -105,7 +105,7 @@ const UserTable = new Table(
 const userRepo = db.makeRepo(UserTable);
 
 const userRepo = db.makeRepo(UserTable, {
-  defaultPutData: () => ({ createdAt: Date.now() }),
+  defaultCreateData: () => ({ createdAt: Date.now() }),
   defaultUpdateData: () => ({ updatedAt: Date.now() }),
 });
 ```
@@ -116,7 +116,7 @@ To create a named, reusable repo class, use the standalone `makeRepo` (see [Repo
 import { makeRepo } from "dinah";
 
 class UserRepo extends makeRepo(UserTable, {
-  defaultPutData: () => ({ createdAt: Date.now() }),
+  defaultCreateData: () => ({ createdAt: Date.now() }),
   defaultUpdateData: () => ({ updatedAt: Date.now() }),
 }) {}
 
@@ -195,8 +195,8 @@ Queries use a MongoDB-like syntax with operators like `$gt`, `$between`, `$prefi
 // Query by partition key
 const posts = await postRepo.query({ authorId: "u1" });
 
-// Query with sort key condition
-const recent = await postRepo.query({ authorId: "u1" }, { postId: { $gte: "2024-" } });
+// Query with sort key condition (sort-key operators go in the query object)
+const recent = await postRepo.query({ authorId: "u1", postId: { $gte: "2024-" } });
 
 // Query a GSI
 const adminsByDate = await userRepo.queryGsi("byRole", {
@@ -302,23 +302,22 @@ await db.trxWrite(
 
 ```typescript
 class UserRepo extends makeRepo(UserTable, {
-  defaultPutData: () => ({ createdAt: Date.now() }),
+  defaultCreateData: () => ({ createdAt: Date.now() }),
   defaultUpdateData: () => ({ updatedAt: Date.now() }),
 }) {}
 ```
 
-`defaultPutData` is merged under every `put` / `create` / `batchWrite` put / `trxPut` / `trxCreate`. `defaultUpdateData` is merged under every `update` / `batchUpdate` / `trxUpdate`. Caller-provided values always win.
+`defaultCreateData` is merged under every `create` / `trxCreate`. `defaultUpdateData` is merged under every `update` / `batchUpdate` / `trxUpdate`. Caller-provided values always win, and any key covered by a default becomes optional at the call site. (`put` / `batchWrite` puts / `trxPut` are raw upserts and do not apply these.)
 
-### transformInput / transformOutput
+### transformAttributes / transformOutput
 
-`transformInput` runs on every write (after defaults are merged) and receives a partial of the schema. `transformOutput` runs on every read and maps the stored shape to your desired return type:
+`transformAttributes` is a per-field map of normalizers applied to write inputs (on `create` and `update`). `transformOutput` runs on every non-projected read and maps the stored shape to your desired return type:
 
 ```typescript
 class UserRepo extends makeRepo(UserTable, {
-  transformInput: (item) => ({
-    ...item,
-    email: item.email?.toLowerCase(),
-  }),
+  transformAttributes: {
+    email: (email) => email.toLowerCase(),
+  },
   transformOutput: (item): UserWithDisplayName => ({
     ...item,
     displayName: `${item.name} <${item.email}>`,
@@ -326,23 +325,26 @@ class UserRepo extends makeRepo(UserTable, {
 }) {}
 ```
 
-Transforms are skipped when a `projection` option is provided, since only a subset of fields is available.
+`transformOutput` is skipped when a `projection` option is provided, or when reading a GSI with a `KEYS_ONLY` / `INCLUDE` projection, since only a subset of fields is available.
 
-### derivedAttributes / immutableAttributes
+### computedAttributes
 
-`derivedAttributes` lists fields that are computed by `transformInput` and should never be written directly by the caller. They are stripped from put and update inputs:
+`computedAttributes` declaratively derives a field from one or more other fields. Computed fields are recomputed on `create` / `update` and cannot be set directly by the caller (attempting to do so throws):
 
 ```typescript
 class UserRepo extends makeRepo(UserTable, {
-  transformInput: (item) => ({
-    ...item,
-    emailDomain: item.email ? item.email.split("@")[1] : undefined,
-  }),
-  derivedAttributes: ["emailDomain"],
+  computedAttributes: {
+    // single source field
+    emailDomain: { from: "email", compute: (email) => email?.split("@")[1] },
+    // multiple source fields
+    displayName: { from: ["name", "email"], compute: (name, email) => name || email },
+  },
 }) {}
 ```
 
-`immutableAttributes` lists fields that may be set on create but must not be changed by updates:
+### immutableAttributes
+
+`immutableAttributes` lists fields that may be set on create but must not be changed by updates (attempting to update one throws):
 
 ```typescript
 class UserRepo extends makeRepo(UserTable, {
@@ -350,7 +352,18 @@ class UserRepo extends makeRepo(UserTable, {
 }) {}
 ```
 
-Both arrays are inferred as literal types — no `as const` needed.
+Both `computedAttributes` keys and `immutableAttributes` are inferred as literal types — no `as const` needed.
+
+### discriminator / resourceName
+
+`discriminator` names a schema field that tags a discriminated-union item type; Dinah uses it to narrow update inputs and results to the matching variant and to guard writes. `resourceName` sets the label used in thrown `DinahError`s (defaults to the class name without the `Repo` suffix, else the table name).
+
+```typescript
+class EventRepo extends makeRepo(EventTable, {
+  discriminator: "kind",
+  resourceName: "Event",
+}) {}
+```
 
 ## License
 
