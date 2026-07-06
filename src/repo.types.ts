@@ -9,10 +9,24 @@ import type {
   ExtractTableDef,
   ExtractTableSchema,
   Obj,
+  Simplify,
   SortKeyQuery,
   ToUnion,
   UpdateExpression,
 } from "./types";
+
+// True when the repo has no custom `transformOutput` (its output type is the raw
+// schema). Wrapped in tuples so unions compare whole, not distributively.
+type IsRawOutput<R extends RepoBase> = [RepoOutput<R>] extends [R["$schema"]]
+  ? [R["$schema"]] extends [RepoOutput<R>]
+    ? true
+    : false
+  : false;
+
+// Simplify a full-item result for display, but ONLY when it is the raw schema.
+// A custom `transformOutput` type (e.g. a class instance) is passed through
+// verbatim so it keeps its nominal identity — see the `Simplify` doc comment.
+type SimplifyItem<R extends RepoBase, T> = IsRawOutput<R> extends true ? Simplify<T> : T;
 
 //-----------------------------------------------------------------------------------------------------
 // Repository Types - all of these types should except a generic R of type RepoBase
@@ -62,8 +76,8 @@ export type RepoOutput<R extends RepoBase> = ReturnType<R["transformOutput"]>;
 export type ApplyProjection<R extends RepoBase, O> = O extends {
   projection: ReadonlyArray<infer P extends AllKeys<R["$schema"]>>;
 }
-  ? Pick<R["$schema"], P>
-  : RepoOutput<R>;
+  ? Simplify<Pick<R["$schema"], P>>
+  : SimplifyItem<R, RepoOutput<R>>;
 
 export type GsiProjectionType<R extends RepoBase, G extends string> =
   GsiDef<R, G> extends { projection: infer P } ? P : undefined;
@@ -98,12 +112,21 @@ type MakeRequired<T, K extends keyof any> = T extends unknown
 export type ApplyGsiProjection<R extends RepoBase, O, G extends string> = O extends {
   projection: ReadonlyArray<infer P extends AllKeys<R["$schema"]>>;
 }
-  ? Pick<R["$schema"], P | Extract<GsiAllKeyAttributes<R, G>, keyof R["$schema"]>>
+  ? Simplify<Pick<R["$schema"], P | Extract<GsiAllKeyAttributes<R, G>, keyof R["$schema"]>>>
   : GsiProjectionType<R, G> extends "ALL" | undefined
-    ? MakeRequired<RepoOutput<R>, Extract<GsiOwnKeyAttributes<R, G>, keyof RepoOutput<R>>>
-    : Pick<
-        R["$schema"],
-        Extract<GsiAllKeyAttributes<R, G> | GsiIncludedAttributes<R, G>, keyof R["$schema"]>
+    ? // ALL projection returns the full item. For the raw schema, promote the
+      // GSI's own key attributes to required and simplify for display; for a
+      // custom `transformOutput` type, use it directly (no key promotion).
+      IsRawOutput<R> extends true
+      ? Simplify<
+          MakeRequired<RepoOutput<R>, Extract<GsiOwnKeyAttributes<R, G>, keyof RepoOutput<R>>>
+        >
+      : RepoOutput<R>
+    : Simplify<
+        Pick<
+          R["$schema"],
+          Extract<GsiAllKeyAttributes<R, G> | GsiIncludedAttributes<R, G>, keyof R["$schema"]>
+        >
       >;
 
 // get ------------------------------------------------------------------------------------------------
@@ -129,10 +152,9 @@ export interface RepoPutOptions<R extends RepoBase> {
   condition?: Condition<R["$schema"]>;
 }
 
-export type RepoPutResult<R extends RepoBase, TItem = {}> = NarrowByDiscriminator<
-  RepoOutput<R>,
-  R["$discriminator"],
-  TItem
+export type RepoPutResult<R extends RepoBase, TItem = {}> = SimplifyItem<
+  R,
+  NarrowByDiscriminator<RepoOutput<R>, R["$discriminator"], TItem>
 >;
 
 // create ---------------------------------------------------------------------------------------------
@@ -142,10 +164,9 @@ export type RepoCreateItem<R extends RepoBase> = Omit<
   R["$computedAttributes"]
 > & { readonly [K in R["$computedAttributes"]]?: never };
 
-export type RepoCreateResult<R extends RepoBase, TItem = {}> = NarrowByDiscriminator<
-  RepoOutput<R>,
-  R["$discriminator"],
-  TItem
+export type RepoCreateResult<R extends RepoBase, TItem = {}> = SimplifyItem<
+  R,
+  NarrowByDiscriminator<RepoOutput<R>, R["$discriminator"], TItem>
 >;
 
 // update ---------------------------------------------------------------------------------------------
@@ -156,7 +177,7 @@ export interface RepoUpdateOptions<R extends RepoBase> {
   condition?: Condition<R["$schema"]>;
 }
 
-export type RepoUpdateResult<R extends RepoBase> = RepoOutput<R>;
+export type RepoUpdateResult<R extends RepoBase> = SimplifyItem<R, RepoOutput<R>>;
 
 // delete ---------------------------------------------------------------------------------------------
 
@@ -164,8 +185,8 @@ export interface RepoDeleteOptions<R extends RepoBase> {
   condition?: Condition<R["$schema"]>;
 }
 
-export type RepoDeleteResult<R extends RepoBase> = RepoOutput<R> | undefined;
-export type RepoDeleteOrThrowResult<R extends RepoBase> = RepoOutput<R>;
+export type RepoDeleteResult<R extends RepoBase> = SimplifyItem<R, RepoOutput<R>> | undefined;
+export type RepoDeleteOrThrowResult<R extends RepoBase> = SimplifyItem<R, RepoOutput<R>>;
 
 // query ---------------------------------------------------------------------------------------------
 

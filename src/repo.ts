@@ -13,14 +13,11 @@ import type {
   RepoCreateResult,
   RepoDeleteOptions,
   RepoDeleteOrThrowResult,
-  RepoDeleteResult,
   RepoExistsOptions,
   RepoGetGsiOptions,
   RepoGetGsiOrThrowResult,
-  RepoGetGsiResult,
   RepoGetOptions,
   RepoGetOrThrowResult,
-  RepoGetResult,
   RepoKey,
   RepoPutOptions,
   RepoPutItem,
@@ -274,7 +271,7 @@ export class Repo<
   async get<const O extends RepoGetOptions<Self>>(
     key: RepoKey<Self>,
     options?: O,
-  ): Promise<RepoGetResult<Self, O>> {
+  ): Promise<RepoGetOrThrowResult<Self, O> | undefined> {
     const { filter, ...restOptions } = (options ?? {}) as RepoGetOptions<Self>;
     const item = await this.db.get({
       table: this.tableName,
@@ -364,7 +361,7 @@ export class Repo<
   async delete(
     key: RepoKey<Self>,
     options?: RepoDeleteOptions<Self>,
-  ): Promise<RepoDeleteResult<Self>> {
+  ): Promise<RepoDeleteOrThrowResult<Self> | undefined> {
     const item = await this.db.delete({
       table: this.tableName,
       key: this.extractKey(key),
@@ -441,7 +438,7 @@ export class Repo<
     gsi: G,
     query: RepoQueryGsiQuery<T, G>,
     options?: O,
-  ): Promise<RepoGetGsiResult<Self, O, G>> {
+  ): Promise<RepoGetGsiOrThrowResult<Self, O, G> | undefined> {
     const { filter, ...restOptions } = (options ?? {}) as RepoGetGsiOptions<Self, T, G>;
     const items = await this.db.query({
       table: this.tableName,

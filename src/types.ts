@@ -3,6 +3,20 @@ import type { Table } from "./table";
 
 export type Obj<T = any> = Record<string, T>;
 
+/**
+ * Force TypeScript to eagerly evaluate a computed type into a plain object for
+ * display, so IntelliSense shows `{ a: string; b: number }` instead of the
+ * `Omit<…> & Pick<…>` / alias machinery it reduces from. Distributes over
+ * unions so discriminated results stay a readable union, and is a structural
+ * identity (preserves `readonly` / optional modifiers) so it never changes
+ * assignability or inference — only the displayed form.
+ *
+ * Only apply this to plain data shapes derived from the schema. Do NOT apply it
+ * to a repo's `transformOutput` type, which may be a class instance: mapping
+ * over it strips the nominal class name and expands its members.
+ */
+export type Simplify<T> = T extends any ? { [K in keyof T]: T[K] } : never;
+
 //-----------------------------------------------------------------------------------------------------
 // Utility Types
 //-----------------------------------------------------------------------------------------------------

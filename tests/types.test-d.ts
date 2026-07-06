@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { describe, expectTypeOf, test } from "vite-plus/test";
 import { makeRepo, Db, Repo, Table } from "../src";
-import type { Condition, SortKeyOps } from "../src/types";
+import type { Condition, Simplify, SortKeyOps } from "../src/types";
 import type {
   RepoGetOptions,
   RepoGetResult,
@@ -97,7 +97,7 @@ describe("queryGsi return types", () => {
   test("ALL projection (default) returns full items", async () => {
     const result = await repo.queryGsi("allGsi", { gsiPk: "a" });
     expectTypeOf(result).toEqualTypeOf<
-      (Omit<Item, "gsiPk" | "gsiSk"> & { gsiPk: string; gsiSk: number })[]
+      Simplify<Omit<Item, "gsiPk" | "gsiSk"> & { gsiPk: string; gsiSk: number }>[]
     >();
   });
 
@@ -134,7 +134,7 @@ describe("queryGsi query argument types", () => {
 
   test("call site: pk-only GSI accepts pk-only query", async () => {
     const result = await repo.queryGsi("pkOnlyGsi", { gsiPk: "a" });
-    expectTypeOf(result).toEqualTypeOf<(Omit<Item, "gsiPk"> & { gsiPk: string })[]>();
+    expectTypeOf(result).toEqualTypeOf<Simplify<Omit<Item, "gsiPk"> & { gsiPk: string }>[]>();
   });
 
   test("rejects missing partition key", () => {
@@ -598,13 +598,15 @@ describe("multi-key GSI projection return types", () => {
       region: "us",
     });
     expectTypeOf(result).toEqualTypeOf<
-      (Omit<MultiKeyItem, "tenantId" | "region" | "round" | "bracket" | "matchId"> & {
-        tenantId: string;
-        region: string;
-        round: string;
-        bracket: string;
-        matchId: string;
-      })[]
+      Simplify<
+        Omit<MultiKeyItem, "tenantId" | "region" | "round" | "bracket" | "matchId"> & {
+          tenantId: string;
+          region: string;
+          round: string;
+          bracket: string;
+          matchId: string;
+        }
+      >[]
     >();
   });
 });
@@ -636,7 +638,7 @@ describe("scanGsi return types", () => {
   test("ALL projection returns full items", async () => {
     const result = await repo.scanGsi("allGsi");
     expectTypeOf(result).toEqualTypeOf<
-      (Omit<Item, "gsiPk" | "gsiSk"> & { gsiPk: string; gsiSk: number })[]
+      Simplify<Omit<Item, "gsiPk" | "gsiSk"> & { gsiPk: string; gsiSk: number }>[]
     >();
   });
 
@@ -669,17 +671,17 @@ type OptItemWithCategoryOnly = Omit<OptItem, "category"> & { category: string };
 describe("GSI optional key promotion", () => {
   test("queryGsi makes optional GSI pk+sk required in result", async () => {
     const result = await optRepo.queryGsi("byCategory", { category: "a" });
-    expectTypeOf(result).toEqualTypeOf<OptItemWithGsiKeys[]>();
+    expectTypeOf(result).toEqualTypeOf<Simplify<OptItemWithGsiKeys>[]>();
   });
 
   test("queryGsi pk-only GSI only promotes pk", async () => {
     const result = await optRepo.queryGsi("byCategoryOnly", { category: "a" });
-    expectTypeOf(result).toEqualTypeOf<OptItemWithCategoryOnly[]>();
+    expectTypeOf(result).toEqualTypeOf<Simplify<OptItemWithCategoryOnly>[]>();
   });
 
   test("scanGsi makes optional GSI pk+sk required in result", async () => {
     const result = await optRepo.scanGsi("byCategory");
-    expectTypeOf(result).toEqualTypeOf<OptItemWithGsiKeys[]>();
+    expectTypeOf(result).toEqualTypeOf<Simplify<OptItemWithGsiKeys>[]>();
   });
 });
 
@@ -732,11 +734,11 @@ describe("transformOutput return type narrowing", () => {
     expectTypeOf(result).toEqualTypeOf<Transformed[]>();
   });
 
-  test("queryGsi ALL returns transformed items with GSI keys required", async () => {
+  test("queryGsi ALL returns the transformOutput type directly (no key promotion)", async () => {
     const result = await tRepo.queryGsi("allGsi", { gsiPk: "a" });
-    expectTypeOf(result).toEqualTypeOf<
-      (Omit<Transformed, "gsiPk" | "gsiSk"> & { gsiPk: string; gsiSk: number })[]
-    >();
+    // A custom transformOutput type is used verbatim — Dinah does not re-shape it
+    // with GSI-key promotion (which would expand a class instance).
+    expectTypeOf(result).toEqualTypeOf<Transformed[]>();
   });
 
   test("queryGsi KEYS_ONLY does NOT transform (returns raw pick)", async () => {
@@ -1417,17 +1419,17 @@ const zooRepo = db.makeRepo(ZooTable, { discriminator: "kind" });
 describe("GSI queries preserve union variants", () => {
   test("queryGsi returns the full union, not a collapsed shape", async () => {
     const result = await zooRepo.queryGsi("byKind", { kind: "cat" });
-    expectTypeOf(result).toEqualTypeOf<(ZooCatGsi | ZooDogGsi)[]>();
+    expectTypeOf(result).toEqualTypeOf<Simplify<ZooCatGsi | ZooDogGsi>[]>();
   });
 
   test("queryGsi narrows by filter when the filter carries the discriminator", async () => {
     const result = await zooRepo.queryGsi("byKind", { kind: "cat" }, { filter: { kind: "cat" } });
-    expectTypeOf(result).toEqualTypeOf<ZooCatGsi[]>();
+    expectTypeOf(result).toEqualTypeOf<Simplify<ZooCatGsi>[]>();
   });
 
   test("scanGsi preserves union variants too", async () => {
     const result = await zooRepo.scanGsi("byKind");
-    expectTypeOf(result).toEqualTypeOf<(ZooCatGsi | ZooDogGsi)[]>();
+    expectTypeOf(result).toEqualTypeOf<Simplify<ZooCatGsi | ZooDogGsi>[]>();
   });
 
   test("regular scan (no GSI) returns the raw union", async () => {
@@ -1668,5 +1670,51 @@ describe("raw Db<T> generic inference", () => {
     await db.get<User>({ table: "t", key: { id: "1" }, projection: ["nope"] });
     // @ts-expect-error — "nope" is not a field of User
     await db.delete<User>({ table: "t", key: { id: "1" }, condition: { nope: 1 } });
+  });
+});
+
+// Simplify (display eager-reduction) must NOT expand a custom transformOutput
+// type. A class instance return type is preserved verbatim (nominal identity
+// kept) rather than being flattened to a structural object.
+describe("transformOutput type is used directly (class instances preserved)", () => {
+  class UserModel {
+    constructor(
+      public pk: string,
+      public sk: string,
+    ) {}
+    get label() {
+      return `${this.pk}/${this.sk}`;
+    }
+  }
+
+  const modelRepo = db.makeRepo(TestTable, {
+    transformOutput: (item) => new UserModel(item.pk, item.sk),
+  });
+
+  test("get preserves the class type", async () => {
+    const r = await modelRepo.get({ pk: "a", sk: "b" });
+    expectTypeOf(r).toEqualTypeOf<UserModel | undefined>();
+  });
+
+  test("query/scan preserve the class type", async () => {
+    expectTypeOf(await modelRepo.query({ pk: "a" })).toEqualTypeOf<UserModel[]>();
+    expectTypeOf(await modelRepo.scan()).toEqualTypeOf<UserModel[]>();
+  });
+
+  test("queryGsi ALL returns the class directly (no key-promotion expansion)", async () => {
+    expectTypeOf(await modelRepo.queryGsi("allGsi", { gsiPk: "a" })).toEqualTypeOf<UserModel[]>();
+  });
+
+  test("put/create/update return the class type", async () => {
+    const item = { pk: "a", sk: "b", gsiPk: "g", gsiSk: 1, title: "t", body: "b", data: "d" };
+    expectTypeOf(await modelRepo.put(item)).toEqualTypeOf<UserModel>();
+    expectTypeOf(
+      await modelRepo.update({ pk: "a", sk: "b" }, { title: "x" }),
+    ).toEqualTypeOf<UserModel>();
+  });
+
+  test("a projection still narrows to the picked schema fields (transform skipped)", async () => {
+    const r = await modelRepo.get({ pk: "a", sk: "b" }, { projection: ["pk", "title"] });
+    expectTypeOf(r).toEqualTypeOf<Simplify<Pick<Item, "pk" | "title">> | undefined>();
   });
 });
