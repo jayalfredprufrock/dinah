@@ -7,9 +7,9 @@ import * as T from "typebox";
 import type { Obj } from "./types";
 import type { Table } from "./table";
 
-export const resolveAttrType = (schema: T.TSchema | T.TEnumValue, attrName: string): "S" | "N" => {
+const collectAttrTypes = (schema: T.TSchema | T.TEnumValue, attrName: string): ("S" | "N")[] => {
   if (T.IsString(schema) || T.IsLiteralString(schema) || typeof schema === "string") {
-    return "S";
+    return ["S"];
   }
 
   if (
@@ -18,32 +18,41 @@ export const resolveAttrType = (schema: T.TSchema | T.TEnumValue, attrName: stri
     T.IsInteger(schema) ||
     typeof schema === "number"
   ) {
-    return "N";
+    return ["N"];
   }
 
   if (T.IsObject(schema)) {
     const attrSchema = schema.properties[attrName];
-    if (!attrSchema) {
-      throw new Error(`Attribute "${attrName}" not found.`);
-    }
-    return resolveAttrType(attrSchema, attrName);
+    return attrSchema ? collectAttrTypes(attrSchema, attrName) : [];
   }
 
-  if (T.IsEnum(schema) || T.IsIntersect(schema) || T.IsUnion(schema)) {
-    const schemas = T.IsEnum(schema)
-      ? schema.enum
-      : T.IsUnion(schema)
-        ? schema.anyOf
-        : schema.allOf;
-    const [firstType, ...otherTypes] = schemas.flatMap((s) => resolveAttrType(s, attrName));
-    if (!firstType || otherTypes.some((t) => t !== firstType)) {
-      throw new Error(`Attribute "${attrName}" type not consistent.`);
-    }
-
-    return firstType;
+  if (T.IsUnion(schema)) {
+    return schema.anyOf.flatMap((s) => collectAttrTypes(s, attrName));
   }
 
-  throw new Error(`Unable to resolve type for attribute "${attrName}"`);
+  if (T.IsIntersect(schema)) {
+    return schema.allOf.flatMap((s) => collectAttrTypes(s, attrName));
+  }
+
+  if (T.IsEnum(schema)) {
+    return schema.enum.flatMap((s) => collectAttrTypes(s, attrName));
+  }
+
+  return [];
+};
+
+export const resolveAttrType = (schema: T.TSchema | T.TEnumValue, attrName: string): "S" | "N" => {
+  const [firstType, ...otherTypes] = collectAttrTypes(schema, attrName);
+
+  if (!firstType) {
+    throw new Error(`Attribute "${attrName}" not found.`);
+  }
+
+  if (otherTypes.some((t) => t !== firstType)) {
+    throw new Error(`Attribute "${attrName}" type not consistent.`);
+  }
+
+  return firstType;
 };
 
 export const extractTableDesc = (table: Table): CreateTableCommandInput => {
