@@ -23,6 +23,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./cdk": "./src/cdk.ts",
+    "./seed": "./src/seed.ts",
     "./streams": "./src/streams.ts",
     "./package.json": "./package.json"
   },
@@ -35,6 +36,10 @@
       "./cdk": {
         "import": "./dist/cdk.mjs",
         "require": "./dist/cdk.cjs"
+      },
+      "./seed": {
+        "import": "./dist/seed.mjs",
+        "require": "./dist/seed.cjs"
       },
       "./streams": {
         "import": "./dist/streams.mjs",

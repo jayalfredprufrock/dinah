@@ -365,6 +365,34 @@ class EventRepo extends makeRepo(EventTable, {
 }) {}
 ```
 
+## Seeding
+
+The optional `dinah/seed` subpath (zero runtime dependencies) is a minimal, deterministic way to define fixture data for a table and write it in a batched `PUT`. Items are typed against the table's schema.
+
+```typescript
+import { createSeed } from "dinah/seed";
+
+const users = createSeed(UserTable, [
+  { userId: "u1", email: "alice@example.com", name: "Alice", role: "admin", createdAt: 0 },
+  { userId: "u2", email: "bob@example.com", name: "Bob", role: "user", createdAt: 0 },
+]);
+
+await users.put(db); // batched PUT — overwrites by key
+```
+
+Reference another seed's `.items` directly — an already-defined seed resolves eagerly, so a plain array is enough:
+
+```typescript
+const posts = createSeed(PostTable, [
+  { postId: "p1", authorId: users.items[0].userId, title: "Hello" },
+]);
+
+await users.put(db);
+await posts.put(db);
+```
+
+Use a thunk (`() => Item[]`) only when a reference can't be resolved at definition time — forward or mutual references, where the other seed is declared later — so it's evaluated lazily. A reference cycle between seeds then throws a clear error rather than looping.
+
 ## License
 
 [MIT](LICENSE)

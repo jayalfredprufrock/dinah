@@ -18,6 +18,7 @@ export default defineConfig({
       {
         streams: "src/streams.ts",
         cdk: "src/cdk.ts",
+        seed: "src/seed.ts",
       },
     ],
   },
