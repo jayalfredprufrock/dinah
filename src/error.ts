@@ -23,7 +23,15 @@ function dinahErrorMessage(details: DinahErrorDetails): string {
   }
 }
 
+// A registered-symbol brand for identifying DinahErrors across module-copy
+// boundaries (dual CJS/ESM builds, multiple installed versions, bundled code).
+// Errors routinely cross those boundaries — thrown deep inside the library and
+// caught elsewhere — where `instanceof` can silently fail. See `isDinahError`.
+const DINAH_ERROR_BRAND: unique symbol = Symbol.for("dinah.error");
+
 export class DinahError extends Error {
+  // Symbol-keyed, so it never shows up in `Object.keys` / `JSON.stringify`.
+  readonly [DINAH_ERROR_BRAND] = true;
   readonly details: DinahErrorDetails;
 
   constructor(details: DinahErrorDetails, options?: ErrorOptions) {
@@ -33,4 +41,13 @@ export class DinahError extends Error {
   }
 }
 
-export const isDinahError = (err: unknown): err is DinahError => err instanceof DinahError;
+/**
+ * Type guard for {@link DinahError}. Uses `instanceof` for the common
+ * same-module case, and falls back to a registered-symbol brand so errors
+ * thrown by a different copy of the library are still recognized.
+ */
+export const isDinahError = (err: unknown): err is DinahError =>
+  err instanceof DinahError ||
+  (typeof err === "object" &&
+    err !== null &&
+    (err as { [DINAH_ERROR_BRAND]?: unknown })[DINAH_ERROR_BRAND] === true);

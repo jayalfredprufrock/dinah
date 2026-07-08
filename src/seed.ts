@@ -17,7 +17,15 @@ export type SeedInput<T extends Table> = SeedItem<T>[] | (() => SeedItem<T>[]);
 // between lazy seeds fails with a clear error instead of a stack overflow.
 const generating = new Set<Seed>();
 
+// A registered-symbol brand for identifying seeds. Unlike `instanceof`, this is
+// stable across module copies (dual CJS/ESM builds, multiple installed versions,
+// bundled CLIs), so `isSeed` reliably recognizes seeds loaded dynamically — e.g.
+// a CLI globbing and importing seed files. See `isSeed`.
+const SEED_BRAND: unique symbol = Symbol.for("dinah.seed");
+
 export class Seed<T extends Table = Table> {
+  // Symbol-keyed, so it never shows up in `Object.keys` / `JSON.stringify`.
+  readonly [SEED_BRAND] = true;
   readonly table: T;
   #input: SeedInput<T>;
   #cache: SeedItem<T>[] | undefined;
@@ -77,3 +85,19 @@ export class Seed<T extends Table = Table> {
  */
 export const createSeed = <T extends Table>(table: T, items: SeedInput<T>): Seed<T> =>
   new Seed(table, items);
+
+/**
+ * Type guard identifying a {@link Seed}. Prefer this over `instanceof Seed` when
+ * seeds may cross module boundaries — e.g. a CLI that globs and dynamically
+ * imports seed files — since it recognizes seeds from any copy of the library:
+ *
+ * ```ts
+ * const mod = await import(file);
+ * const seeds = Object.values(mod).filter(isSeed);
+ * for (const seed of seeds) await seed.put(db);
+ * ```
+ */
+export const isSeed = (value: unknown): value is Seed =>
+  typeof value === "object" &&
+  value !== null &&
+  (value as { [SEED_BRAND]?: unknown })[SEED_BRAND] === true;

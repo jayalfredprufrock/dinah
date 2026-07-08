@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import { describe, expect, test, vi } from "vite-plus/test";
 import type { Db } from "../src";
 import { Table } from "../src";
-import { createSeed } from "../src/seed";
+import { createSeed, isSeed, Seed } from "../src/seed";
 
 const UserTable = new Table(
   Type.Object({ id: Type.String(), name: Type.String(), role: Type.String() }),
@@ -63,6 +63,24 @@ describe("createSeed", () => {
       { id: (s.items[0] as { id: string }).id, name: "x", role: "user" },
     ]);
     expect(() => s.items).toThrow(/Circular seed reference detected: users → users/);
+  });
+
+  test("is identifiable via isSeed and instanceof Seed", () => {
+    const users = createSeed(UserTable, [{ id: "u1", name: "Alice", role: "admin" }]);
+    expect(isSeed(users)).toBe(true);
+    expect(users).toBeInstanceOf(Seed);
+
+    for (const notASeed of [null, undefined, {}, [], "seed", 42, UserTable]) {
+      expect(isSeed(notASeed)).toBe(false);
+    }
+  });
+
+  test("isSeed recognizes a seed branded via the shared registered symbol", () => {
+    // Simulates a seed created by a different copy of the library (dual CJS/ESM
+    // build, separate install): different class identity, same Symbol.for brand.
+    const fromOtherCopy = { [Symbol.for("dinah.seed")]: true, table: UserTable, items: [] };
+    expect(isSeed(fromOtherCopy)).toBe(true);
+    expect(fromOtherCopy).not.toBeInstanceOf(Seed); // instanceof would miss it
   });
 
   test(".put writes every item as a PUT batch request to the table's repo", async () => {
