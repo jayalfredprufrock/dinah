@@ -4,7 +4,17 @@ export type DinahErrorDetails =
   | { type: "CONDITIONAL_CHECK_FAILED"; key?: Record<string, unknown>; resource?: string }
   | { type: "VALIDATION"; message: string }
   | { type: "TRANSACTION_CANCELED"; reasons: Array<{ type: string; message?: string }> }
-  | { type: "DATA_INTEGRITY"; message: string };
+  | { type: "DATA_INTEGRITY"; message: string }
+  | { type: "BATCH_UNPROCESSED"; unprocessed: Record<string, number> }
+  | { type: "BATCH_FAILED"; failures: BatchStatementFailure[] };
+
+/** A per-statement error from `batchUpdate` that is not worth retrying. */
+export interface BatchStatementFailure {
+  table: string;
+  key: Record<string, unknown>;
+  code?: string;
+  message?: string;
+}
 
 function dinahErrorMessage(details: DinahErrorDetails): string {
   switch (details.type) {
@@ -20,6 +30,16 @@ function dinahErrorMessage(details: DinahErrorDetails): string {
       return `Data integrity error: ${details.message}`;
     case "TRANSACTION_CANCELED":
       return `Transaction canceled: ${details.reasons.map((r) => r.type).join(", ")}`;
+    case "BATCH_UNPROCESSED": {
+      const entries = Object.entries(details.unprocessed);
+      const total = entries.reduce((sum, [, count]) => sum + count, 0);
+      const breakdown = entries.map(([table, count]) => `${table}: ${count}`).join(", ");
+      return `Batch incomplete: ${total} request(s) were not processed (${breakdown}).`;
+    }
+    case "BATCH_FAILED": {
+      const codes = [...new Set(details.failures.map((f) => f.code ?? "Unknown"))].join(", ");
+      return `Batch failed: ${details.failures.length} statement(s) returned a permanent error (${codes}).`;
+    }
   }
 }
 

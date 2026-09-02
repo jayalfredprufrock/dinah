@@ -11,7 +11,8 @@ import {
   TransactionCanceledException,
   type WriteRequest,
 } from "@aws-sdk/client-dynamodb";
-import { DinahError } from "./error";
+import { runBatched } from "./batch";
+import { type BatchStatementFailure, DinahError } from "./error";
 //import { DynamoDBStreams } from '@aws-sdk/client-dynamodb-streams';
 import type { TransactGetCommandInput, TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
 import * as Lib from "@aws-sdk/lib-dynamodb";
@@ -20,6 +21,7 @@ import { Repo, type RepoConfig, type ValidComputedMap } from "./repo";
 import type { Table } from "./table";
 import type {
   DbBatchGet,
+  DbBatchOptions,
   DbBatchGetResponse,
   DbBatchUpdate,
   DbBatchUpdateResponse,
@@ -55,6 +57,32 @@ import { extractTableDesc, matchesPartial, removeUndefined } from "./util";
 // - type out repo update data
 // - does it handle nested undefined removal? nested $remove
 // - maybe extract resourceName from schema?
+// - maybe repos with discriminators should have options like defaultCreateData and defaultUpdateData return
+//   an object keyed by the discriminator value...?
+
+/**
+ * Stable identity for a primary key, used to spot the duplicates DynamoDB
+ * rejects. Driven off a fixed `keyNames` list rather than each object's own
+ * property order, so two objects describing the same key always agree, and
+ * JSON-encoded per value so a numeric `1` and a string `"1"` stay distinct.
+ */
+const keyIdentity = (keyNames: string[], source: Obj): string =>
+  keyNames.map((name) => JSON.stringify(source[name])).join("\u0000");
+
+/**
+ * PartiQL `BatchExecuteStatement` reports per-statement failures inline rather
+ * than as a request error. Only these codes are transient; everything else
+ * (ValidationError, ConditionalCheckFailed, ResourceNotFound, DuplicateItem,
+ * AccessDenied, ItemCollectionSizeLimitExceeded) is a permanent failure that
+ * must be surfaced instead of retried.
+ */
+const RETRYABLE_STATEMENT_ERROR_CODES = new Set<string>([
+  "InternalServerError",
+  "ProvisionedThroughputExceeded",
+  "RequestLimitExceeded",
+  "ThrottlingError",
+  "TransactionConflict",
+]);
 
 export class Db {
   readonly client: Lib.DynamoDBDocumentClient;
@@ -63,11 +91,24 @@ export class Db {
   //protected streamEventListeners: DbStreamEventListener[] = [];
 
   constructor(
-    clientOrConfig: DynamoDBClient | DynamoDB | DynamoDBClientConfig,
+    clientOrConfig: DynamoDBClient | DynamoDB | Lib.DynamoDBDocumentClient | DynamoDBClientConfig,
     dbConfig?: DbConfig,
   ) {
-    if (clientOrConfig instanceof DynamoDBClient || clientOrConfig instanceof DynamoDB) {
-      this.client = Lib.DynamoDBDocumentClient.from(new DynamoDBClient(clientOrConfig));
+    // Every field of DynamoDBClientConfig is optional, so any object satisfies
+    // that branch structurally — these instance checks are what actually
+    // discriminate the union, and a missed one silently falls through to
+    // "treat this client as a bag of config", producing a default client.
+    if (clientOrConfig instanceof Lib.DynamoDBDocumentClient) {
+      // Already a document client (possibly with its own translateConfig) —
+      // wrapping it again would double up the marshalling middleware.
+      this.client = clientOrConfig;
+    } else if (clientOrConfig instanceof DynamoDBClient) {
+      // Covers DynamoDB too, which extends DynamoDBClient. Wrap the caller's
+      // client rather than reconstructing one from it: a client instance only
+      // exposes `config` / `middlewareStack` / `handlers` at the top level, so
+      // `new DynamoDBClient(client)` would silently discard their region,
+      // endpoint, credentials and retry settings.
+      this.client = Lib.DynamoDBDocumentClient.from(clientOrConfig);
     } else {
       const { endpoint, ...clientConfig } = clientOrConfig;
       // client doesn't interpret an empty string endpoint as falsy so normalize things
@@ -401,9 +442,14 @@ export class Db {
     return false;
   }
 
-  // TODO: test wildly different item sizes to make
-  // sure retry algorithm works properly
-  async batchGet(data: DbBatchGet): Promise<DbBatchGetResponse> {
+  // Chunks are a constant 100 keys, but DynamoDB also caps a response at 16MB,
+  // which 100 large items can exceed — the overflow comes back in
+  // `UnprocessedKeys` even though nothing was throttled. That can't be avoided
+  // by sizing the chunk, since a get only holds keys and the response size
+  // isn't knowable until it arrives. The retry loop absorbs it: each pass
+  // returns what fit, which is progress, so it converges in a few round trips
+  // without touching the stall budget. See tests/batch-retry.test.ts.
+  async batchGet(data: DbBatchGet, options?: DbBatchOptions): Promise<DbBatchGetResponse> {
     const result: DbBatchGetResponse = { items: {} };
 
     const tableData = Object.fromEntries(
@@ -428,69 +474,64 @@ export class Db {
       }),
     );
 
+    // Duplicate keys are dropped rather than rejected. DynamoDB refuses a
+    // request containing the same key twice, and chunking makes that
+    // position-dependent: repeats inside one chunk raise a ValidationException
+    // while repeats straddling a boundary quietly return the item more than
+    // once. Neither is useful, and a repeated read carries no information, so
+    // the first occurrence wins and the rest are discarded. Contrast
+    // `batchWrite` / `batchUpdate`, where collapsing a repeat would change
+    // what the caller asked for.
     const flattenedBatches = Object.entries(data).flatMap(([table, request]) => {
-      return request.keys.map((key, i) => {
-        const itemIndexKey =
-          tableData[table]?.keyNames.map((keyName) => key[keyName]).join("|") ?? "";
+      const seen = new Set<string>();
+
+      return request.keys.flatMap((key, i) => {
+        const itemIndexKey = keyIdentity(tableData[table]?.keyNames ?? [], key);
+        if (seen.has(itemIndexKey)) return [];
+
+        seen.add(itemIndexKey);
         tableData[table]?.itemIndexMap.set(itemIndexKey, i);
-        return [table, key] as const;
+        return [[table, key] as const];
       });
     });
 
-    let batchSize = 100;
-    let retryCount = 0;
+    const leftover = await runBatched(
+      flattenedBatches,
+      async (chunk) => {
+        const request: BatchGetItemInput["RequestItems"] = {};
+        for (const [table, key] of chunk) {
+          if (!request[table]) {
+            request[table] = { ...tableData[table]?.request, Keys: [] };
+          }
 
-    while (flattenedBatches.length && retryCount < 5) {
-      const batch = flattenedBatches.splice(0, batchSize || 1);
-
-      const request: BatchGetItemInput["RequestItems"] = {};
-      for (const [table, key] of batch) {
-        if (!request[table]) {
-          request[table] = { ...tableData[table]?.request, Keys: [] };
+          request[table].Keys?.push(key);
         }
 
-        request[table].Keys?.push(key);
-      }
+        const input = new Lib.BatchGetCommand({ RequestItems: request });
+        const output = await this.client.send(input);
 
-      const input = new Lib.BatchGetCommand({ RequestItems: request });
-      const output = await this.client.send(input);
+        for (const [table, items] of Object.entries(output.Responses ?? {})) {
+          //just to appease typescript
+          if (!result.items[table]) continue;
 
-      for (const [table, items] of Object.entries(output.Responses ?? {})) {
-        //just to appease typescript
-        if (!result.items[table]) continue;
+          const filteredItems = tableData[table]?.filter
+            ? items.filter((item) => matchesPartial(tableData[table]!.filter as any, item as any))
+            : items;
 
-        const filteredItems = tableData[table]?.filter
-          ? items.filter((item) => matchesPartial(tableData[table]!.filter as any, item as any))
-          : items;
+          result.items[table].push(...filteredItems);
+        }
 
-        result.items[table].push(...filteredItems);
-      }
+        return Object.entries(output.UnprocessedKeys ?? {}).flatMap(([table, request]) =>
+          (request.Keys ?? []).map((key) => [table, key] as const),
+        );
+      },
+      { limit: 100, ...options },
+    );
 
-      // handle unprocessed requests
-      let unprocessedKeyCount = 0;
-      for (const [table, request] of Object.entries(output.UnprocessedKeys ?? {})) {
-        const unprocessed = (request.Keys ?? []).map((key) => [table, key] as const);
-        flattenedBatches.push(...unprocessed);
-        unprocessedKeyCount += unprocessed.length;
-      }
-
-      //move immediately to next batch if all requests were processed
-      if (!unprocessedKeyCount) {
-        retryCount = 0;
-        continue;
-      }
-
-      // reduce batch size so we don't continue to overfetch,
-      // but do it gradually by only splitting the difference
-      batchSize -= Math.floor(unprocessedKeyCount / 2);
-
-      retryCount++;
-    }
-
-    // anything left in flattened batches needs to be returned in unprocessed
-    if (flattenedBatches.length) {
+    // anything the service couldn't process needs to be returned in unprocessed
+    if (leftover.length) {
       result.unprocessed = {};
-      for (const [table, key] of flattenedBatches) {
+      for (const [table, key] of leftover) {
         if (!result.unprocessed[table]) {
           result.unprocessed[table] = {
             ...tableData[table]?.request,
@@ -509,8 +550,8 @@ export class Db {
       if (!itemIndexMap || !keyNames) continue;
 
       items.sort((item1, item2) => {
-        const item1IndexKey = keyNames.map((keyName) => item1[keyName]).join("|");
-        const item2IndexKey = keyNames.map((keyName) => item2[keyName]).join("|");
+        const item1IndexKey = keyIdentity(keyNames, item1);
+        const item2IndexKey = keyIdentity(keyNames, item2);
 
         return (itemIndexMap.get(item1IndexKey) ?? 0) - (itemIndexMap.get(item2IndexKey) ?? 0);
       });
@@ -519,15 +560,24 @@ export class Db {
     return result;
   }
 
-  async batchGetOrThrow(data: DbBatchGet): Promise<DbBatchGetResponse["items"]> {
-    const { items, unprocessed } = await this.batchGet(data);
+  async batchGetOrThrow(
+    data: DbBatchGet,
+    options?: DbBatchOptions,
+  ): Promise<DbBatchGetResponse["items"]> {
+    const { items, unprocessed } = await this.batchGet(data, options);
 
     for (const table of Object.keys(data)) {
       if (unprocessed?.[table]) {
         throw new Error(`One or more batch get requests were not processed in "${table}" table.`);
       }
 
-      if (items[table]?.length !== data[table]?.keys?.length) {
+      // Compared against *distinct* keys, since batchGet collapses repeats.
+      const requestedKeys = data[table]?.keys ?? [];
+      const distinctRequested = new Set(
+        requestedKeys.map((key) => keyIdentity(Object.keys(requestedKeys.at(0) ?? {}), key)),
+      ).size;
+
+      if (items[table]?.length !== distinctRequested) {
         // Key identity is not tracked through batchGet — key: {} is a known limitation here.
         throw new DinahError({ type: "NOT_FOUND", key: {}, resource: data[table]?.resource });
       }
@@ -536,9 +586,10 @@ export class Db {
     return items;
   }
 
-  // TODO: test wildly different item sizes to make
-  // sure retry algorithm works properly
-  async batchWrite(data: DbBatchWrite): Promise<DbBatchWriteResponse> {
+  // Item size can't push a write chunk over DynamoDB's 16MB request cap: 25
+  // items at the 400KB per-item maximum is 10MB. Unlike batchGet, unprocessed
+  // items here always mean throttling.
+  async batchWrite(data: DbBatchWrite, options?: DbBatchOptions): Promise<DbBatchWriteResponse> {
     const result: DbBatchWriteResponse = { items: {} };
 
     const flattenedBatches = Object.keys(data).flatMap((table) => {
@@ -553,49 +604,31 @@ export class Db {
       );
     });
 
-    let batchSize = 25;
-    let retryCount = 0;
-
-    while (flattenedBatches.length && retryCount < 5) {
-      const batch = flattenedBatches.splice(0, batchSize || 1);
-
-      const request: BatchWriteItemInput["RequestItems"] = {};
-      for (const [table, req] of batch) {
-        if (!request[table]) {
-          request[table] = [];
+    const leftover = await runBatched(
+      flattenedBatches,
+      async (chunk) => {
+        const request: BatchWriteItemInput["RequestItems"] = {};
+        for (const [table, req] of chunk) {
+          if (!request[table]) {
+            request[table] = [];
+          }
+          request[table].push(req);
         }
-        request[table].push(req);
-      }
 
-      const input = new Lib.BatchWriteCommand({ RequestItems: request });
-      const output = await this.client.send(input);
+        const input = new Lib.BatchWriteCommand({ RequestItems: request });
+        const output = await this.client.send(input);
 
-      // handle unprocessed requests
-      let unprocessedKeyCount = 0;
-      for (const [table, requests] of Object.entries(output.UnprocessedItems ?? {})) {
-        for (const request of requests) {
-          flattenedBatches.push([table, request]);
-          unprocessedKeyCount++;
-        }
-      }
+        return Object.entries(output.UnprocessedItems ?? {}).flatMap(([table, requests]) =>
+          requests.map((request) => [table, request] as [string, WriteRequest]),
+        );
+      },
+      { limit: 25, ...options },
+    );
 
-      //move immediately to next batch if all requests were processed
-      if (!unprocessedKeyCount) {
-        retryCount = 0;
-        continue;
-      }
-
-      // reduce batch size so we don't continue to overwrite,
-      // but do it gradually by only splitting the difference
-      batchSize -= Math.floor(unprocessedKeyCount / 2);
-
-      retryCount++;
-    }
-
-    // anything left in flattened batches needs to be returned in unprocessed
-    if (flattenedBatches.length) {
+    // anything the service couldn't process needs to be returned in unprocessed
+    if (leftover.length) {
       result.unprocessed = {};
-      for (const [table, request] of flattenedBatches) {
+      for (const [table, request] of leftover) {
         if (!result.unprocessed[table]) {
           result.unprocessed[table] = [];
         }
@@ -617,61 +650,112 @@ export class Db {
     return result;
   }
 
-  async batchUpdate(data: DbBatchUpdate): Promise<DbBatchUpdateResponse> {
-    const queue = Object.entries(data).flatMap(([table, req]) =>
-      req.keys.map((key) => [table, key, req.update] as [string, Obj, Obj]),
-    );
+  /**
+   * `batchWrite`, but throws a `BATCH_UNPROCESSED` {@link DinahError} instead of
+   * returning leftovers. Prefer this for bulk/operator jobs, where silently
+   * dropping part of the write is worse than failing.
+   */
+  async batchWriteOrThrow(data: DbBatchWrite, options?: DbBatchOptions): Promise<void> {
+    const { unprocessed } = await this.batchWrite(data, options);
 
-    let batchSize = 25;
-    let retryCount = 0;
+    if (unprocessed) {
+      throw new DinahError({
+        type: "BATCH_UNPROCESSED",
+        unprocessed: Object.fromEntries(
+          Object.entries(unprocessed).map(([table, requests]) => [table, requests.length]),
+        ),
+      });
+    }
+  }
 
-    while (queue.length && retryCount < 5) {
-      const batch = queue.splice(0, batchSize || 1);
+  async batchUpdate(data: DbBatchUpdate, options?: DbBatchOptions): Promise<DbBatchUpdateResponse> {
+    // Rejected rather than deduplicated: an update expression need not be
+    // idempotent (`{ count: { $plus: 1 } }` twice is not the same as once), so
+    // silently dropping a repeat would change the result the caller asked for.
+    const queue = Object.entries(data).flatMap(([table, req]) => {
+      const keyNames = Object.keys(req.keys.at(0) ?? {});
+      const seen = new Set<string>();
 
-      const statements = batch.map(([table, key, update]) => {
-        const exp = new ExpressionBuilder();
-        const { sets, removes, params } = exp.partiqlUpdate(this.normalizeUpdate(update));
-
-        const whereParts: string[] = [];
-        for (const [field, value] of Object.entries(key)) {
-          whereParts.push(`"${field}"=?`);
-          params.push(value);
+      return req.keys.map((key) => {
+        const identity = keyIdentity(keyNames, key);
+        if (seen.has(identity)) {
+          throw new DinahError({
+            type: "VALIDATION",
+            message:
+              `batchUpdate received the same key twice for table "${table}": ${JSON.stringify(key)}. ` +
+              `DynamoDB rejects a batch containing two operations on one item, and an update may not ` +
+              `be idempotent, so duplicates are not dropped automatically.`,
+          });
         }
+        seen.add(identity);
 
-        const clauses = [...sets.map((s) => `SET ${s}`), ...removes.map((r) => `REMOVE ${r}`)].join(
-          " ",
+        return [table, key, req.update] as [string, Obj, Obj];
+      });
+    });
+
+    // Permanent per-statement errors are collected rather than retried — a
+    // ValidationException or a failed conditional check will never succeed on
+    // a second attempt, and retrying it burns the stall budget that genuine
+    // throttling needs.
+    const failures: BatchStatementFailure[] = [];
+
+    const leftover = await runBatched(
+      queue,
+      async (chunk) => {
+        const statements = chunk.map(([table, key, update]) => {
+          const exp = new ExpressionBuilder();
+          const { sets, removes, params } = exp.partiqlUpdate(this.normalizeUpdate(update));
+
+          const whereParts: string[] = [];
+          for (const [field, value] of Object.entries(key)) {
+            whereParts.push(`"${field}"=?`);
+            params.push(value);
+          }
+
+          const clauses = [
+            ...sets.map((s) => `SET ${s}`),
+            ...removes.map((r) => `REMOVE ${r}`),
+          ].join(" ");
+
+          return {
+            Statement: `UPDATE "${table}" ${clauses} WHERE ${whereParts.join(" AND ")}`,
+            Parameters: params,
+          };
+        });
+
+        const output = await this.client.send(
+          new Lib.BatchExecuteStatementCommand({ Statements: statements }),
         );
 
-        return {
-          Statement: `UPDATE "${table}" ${clauses} WHERE ${whereParts.join(" AND ")}`,
-          Parameters: params,
-        };
-      });
+        const retry: [string, Obj, Obj][] = [];
+        output.Responses?.forEach((response, i) => {
+          const entry = chunk[i];
+          if (!response.Error || !entry) return;
 
-      const output = await this.client.send(
-        new Lib.BatchExecuteStatementCommand({ Statements: statements }),
-      );
+          if (RETRYABLE_STATEMENT_ERROR_CODES.has(response.Error.Code ?? "")) {
+            retry.push(entry);
+          } else {
+            failures.push({
+              table: entry[0],
+              key: entry[1],
+              code: response.Error.Code,
+              message: response.Error.Message,
+            });
+          }
+        });
 
-      let failCount = 0;
-      output.Responses?.forEach((response, i) => {
-        if (response.Error && batch[i]) {
-          queue.push(batch[i]);
-          failCount++;
-        }
-      });
+        return retry;
+      },
+      { limit: 25, ...options },
+    );
 
-      if (!failCount) {
-        retryCount = 0;
-        continue;
-      }
-
-      batchSize -= Math.floor(failCount / 2);
-      retryCount++;
+    if (failures.length) {
+      throw new DinahError({ type: "BATCH_FAILED", failures });
     }
 
-    if (queue.length) {
+    if (leftover.length) {
       const unprocessed: DbBatchUpdate = {};
-      for (const [table, key, update] of queue) {
+      for (const [table, key, update] of leftover) {
         if (!unprocessed[table]) {
           unprocessed[table] = { keys: [], update };
         }

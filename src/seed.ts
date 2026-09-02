@@ -1,4 +1,5 @@
 import type { Db } from "./db";
+import type { DbBatchOptions } from "./db.types";
 import type { Table } from "./table";
 import type { ExtractTableSchema } from "./types";
 
@@ -12,6 +13,10 @@ export type SeedItem<T extends Table> = ExtractTableSchema<T>;
  * consistent.
  */
 export type SeedInput<T extends Table> = SeedItem<T>[] | (() => SeedItem<T>[]);
+
+// Requests in flight for a seed. Past ~5 the gain flattens out, and DynamoDB
+// Local (where seeds usually land) serializes writes anyway.
+const SEED_PARALLEL = 5;
 
 // Tracks seeds whose items are currently being generated, so a reference cycle
 // between lazy seeds fails with a clear error instead of a stack overflow.
@@ -58,10 +63,23 @@ export class Seed<T extends Table = Table> {
     return this.#cache;
   }
 
-  /** Write every item to its table via a batched `PUT` (overwrites by key). */
-  async put(db: Db): Promise<void> {
+  /**
+   * Write every item to its table via a batched `PUT` (overwrites by key).
+   *
+   * Throws a `BATCH_UNPROCESSED` `DinahError` if the table could not accept
+   * every item. A seed that silently wrote only part of its data is worse than
+   * one that fails, since everything downstream assumes it completed.
+   */
+  async put(db: Db, options?: DbBatchOptions): Promise<void> {
     const repo = db.makeRepo(this.table);
-    await repo.batchWrite(this.items.map((item) => ({ type: "PUT", item })) as never);
+    await repo.batchWriteOrThrow(this.items.map((item) => ({ type: "PUT", item })) as never, {
+      // Batch writes are serial by default because the library can't know
+      // whether something above it is already running many of them at once.
+      // Seeding can: it's a single process, off the request path, and usually
+      // the only thing touching the table.
+      parallel: SEED_PARALLEL,
+      ...options,
+    });
   }
 }
 

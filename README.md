@@ -249,7 +249,18 @@ await userRepo.batchWrite([
 
 // Batch update (same update applied to multiple keys via PartiQL)
 await userRepo.batchUpdate([{ userId: "u1" }, { userId: "u3" }], { role: "admin" });
+
+// Bulk jobs: throw instead of returning leftovers, and tune concurrency
+await userRepo.batchWriteOrThrow(requests, { parallel: 10 });
 ```
+
+Batch methods chunk automatically and retry unprocessed items with exponential backoff until a pass
+makes no progress at all. `batchWrite` returns leftovers on `unprocessed`; `batchWriteOrThrow`
+raises instead, which is usually what you want for bulk or operator-run jobs.
+
+Requests are serial by default. Raise `parallel` when your process is the only writer (a CLI
+migration, a seed); leave it alone when something above you — a stream/queue consumer, a request
+path — is already running batches concurrently.
 
 #### Transactions
 
@@ -392,6 +403,8 @@ await posts.put(db);
 ```
 
 Use a thunk (`() => Item[]`) only when a reference can't be resolved at definition time — forward or mutual references, where the other seed is declared later — so it's evaluated lazily. A reference cycle between seeds then throws a clear error rather than looping.
+
+> **Note:** the thunk form loses excess-property checks — a stray or misspelled optional field slips through silently (missing and wrong-typed fields are still caught). This is a TypeScript limitation on function-return literals, not something the API can fix. Restore strict checking by appending `satisfies Post[]` to the returned array, where `Post` is your item type — the `Static<typeof PostSchema>` you already used to define the table (or `SeedItem<typeof PostTable>`).
 
 ## License
 

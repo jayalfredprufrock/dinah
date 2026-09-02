@@ -11,18 +11,20 @@ sidebar:
 
 ```typescript
 new Db(
-  clientOrConfig: DynamoDBClient | DynamoDB | DynamoDBClientConfig,
+  clientOrConfig: DynamoDBClient | DynamoDB | DynamoDBDocumentClient | DynamoDBClientConfig,
   dbConfig?: DbConfig,
 )
 ```
 
 - **`clientOrConfig`** — one of:
   - a `DynamoDBClientConfig` — Dinah constructs a new `DynamoDBClient` and wraps it in a `DynamoDBDocumentClient`.
-  - an existing `DynamoDBClient` — Dinah wraps it in a new document client.
-  - an existing `DynamoDB` — Dinah unwraps it and wraps in a document client.
+  - an existing `DynamoDBClient` (or `DynamoDB`) — Dinah wraps it in a document client, preserving its region, endpoint, credentials, retry settings and middleware.
+  - an existing `DynamoDBDocumentClient` — Dinah uses it as-is, so your `translateConfig` (marshalling options) is preserved. Wrapping it again would double up the marshalling middleware.
 - **`dbConfig`** (optional) — `{ tableNamePrefix?: string }`. When set, every Repo prefixes its `tableName` with this value, which is useful for environment-scoped tables (`staging_users`, `prod_users`, …).
 
 If `clientOrConfig.endpoint` is an empty string, Dinah normalizes it to `undefined` before constructing the client, so local DynamoDB configs that read from environment variables don't trip over `DYNAMODB_ENDPOINT=""`.
+
+Note that every field of `DynamoDBClientConfig` is optional, so _any_ object is assignable to that branch of the union — TypeScript can't tell a client apart from a config. Dinah discriminates at runtime with `instanceof`, which is why passing a client of any of the three supported kinds is safe. Passing some _other_ client-like object, though, will be treated as a bag of config and silently yield a default client.
 
 ## Properties
 
@@ -238,34 +240,70 @@ Cross-table batch get. Dinah:
 5. Applies any per-table `filter` client-side as a partial match. Items that fail the filter are dropped (not included in `items` or `unprocessed`).
 6. Returns any still-unprocessed keys after the final retry round on `unprocessed`.
 
-### `batchGetOrThrow(data)`
+### `batchGetOrThrow(data, options?)`
 
 ```typescript
-batchGetOrThrow(data: DbBatchGet): Promise<Record<string, Obj[]>>
+batchGetOrThrow(data: DbBatchGet, options?: DbBatchOptions): Promise<Record<string, Obj[]>>
 ```
 
 Same as `batchGet`, but throws if any table has unprocessed keys or fewer returned items than requested keys.
 
-### `batchWrite(data)`
+### `batchWrite(data, options?)`
 
 ```typescript
 batchWrite(data: Record<string, Array<
   | { type: "PUT"; item: Obj }
   | { type: "DELETE"; key: Obj }
->>): Promise<{
-  items: Record<string, Obj[]>;
+>>, options?: DbBatchOptions): Promise<{
+  items: Record<string, Obj[]>; // deprecated — always empty
   unprocessed?: Record<string, Array<{ type: "PUT"; item: Obj } | { type: "DELETE"; key: Obj }>>;
 }>
 ```
 
-Cross-table batch write (put + delete). Dinah:
+Cross-table batch write (put + delete). Unlike `repo.batchWrite`, this cannot detect duplicate keys — it receives raw PUT items and doesn't know which attributes form the key, so DynamoDB's own `ValidationException` surfaces instead. See [Duplicate keys](/guides/batch-and-transactions/#duplicate-keys).
+
+Dinah:
 
 1. Chunks requests across all tables into batches of 25 (DynamoDB's `BatchWriteItem` limit).
-2. Sends `BatchWriteCommand`s.
-3. Re-queues `UnprocessedItems` with a shrinking batch size, up to 5 retry rounds.
+2. Sends up to `parallel` `BatchWriteCommand`s at a time.
+3. Re-queues `UnprocessedItems` and retries them on the next pass, after an exponential-backoff delay.
 4. Returns any still-unprocessed requests on `unprocessed`.
 
 `BatchWriteItem` does not support condition expressions — use `trxWrite` if you need them.
+
+`items` is deprecated and always empty: `BatchWriteItem` does not return the items it wrote.
+
+### `batchWriteOrThrow(data, options?)`
+
+```typescript
+batchWriteOrThrow(data: DbBatchWrite, options?: DbBatchOptions): Promise<void>
+```
+
+Same as `batchWrite`, but throws a `BATCH_UNPROCESSED` `DinahError` — carrying a per-table count of what was left over — instead of returning leftovers a caller might ignore. Prefer this for bulk and operator-run jobs.
+
+### `batchUpdate(data, options?)`
+
+```typescript
+batchUpdate(data: DbBatchUpdate, options?: DbBatchOptions): Promise<{
+  unprocessed?: DbBatchUpdate;
+}>
+```
+
+Applies an update expression to many keys via PartiQL `BatchExecuteStatement`. Duplicate keys are rejected with a `VALIDATION` `DinahError`, since an update expression need not be idempotent. Transient per-statement errors are retried and surface on `unprocessed`; permanent ones throw a `BATCH_FAILED` `DinahError`. See [Batch updates](/guides/batch-and-transactions/#batch-updates).
+
+### `DbBatchOptions`
+
+```typescript
+{
+  parallel?: number;   // requests in flight, default 1
+  maxStalls?: number;  // consecutive zero-progress passes before giving up, default 10
+  baseDelay?: number;  // backoff base in ms, default 50
+  chunkSize?: number;  // items per request; defaults to and is clamped to
+                       // DynamoDB's max (25 write/update, 100 get)
+}
+```
+
+Accepted by every batch method. Batches are serial by default; raise `parallel` only when your process is the only writer. See [Should you raise `parallel`?](/guides/batch-and-transactions/#should-you-raise-parallel).
 
 ### `trxGet(...requests)`
 

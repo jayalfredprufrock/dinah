@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { describe, expect, test, vi } from "vite-plus/test";
 import type { Db } from "../src";
-import { Table } from "../src";
+import { DinahError, Table } from "../src";
 import { createSeed, isSeed, Seed } from "../src/seed";
 
 const UserTable = new Table(
@@ -84,8 +84,8 @@ describe("createSeed", () => {
   });
 
   test(".put writes every item as a PUT batch request to the table's repo", async () => {
-    const batchWrite = vi.fn(async () => ({ items: [] }));
-    const makeRepo = vi.fn(() => ({ batchWrite }));
+    const batchWriteOrThrow = vi.fn(async (_requests: unknown, _options?: unknown) => undefined);
+    const makeRepo = vi.fn(() => ({ batchWriteOrThrow }));
     const db = { makeRepo } as unknown as Db;
 
     const users = createSeed(UserTable, [
@@ -95,9 +95,35 @@ describe("createSeed", () => {
     await users.put(db);
 
     expect(makeRepo).toHaveBeenCalledWith(UserTable);
-    expect(batchWrite).toHaveBeenCalledWith([
-      { type: "PUT", item: { id: "u1", name: "Alice", role: "admin" } },
-      { type: "PUT", item: { id: "u2", name: "Bob", role: "user" } },
-    ]);
+    expect(batchWriteOrThrow).toHaveBeenCalledWith(
+      [
+        { type: "PUT", item: { id: "u1", name: "Alice", role: "admin" } },
+        { type: "PUT", item: { id: "u2", name: "Bob", role: "user" } },
+      ],
+      { parallel: 5 },
+    );
+  });
+
+  test(".put writes in parallel by default, and lets the caller override it", async () => {
+    const batchWriteOrThrow = vi.fn(async (_requests: unknown, _options?: unknown) => undefined);
+    const db = { makeRepo: () => ({ batchWriteOrThrow }) } as unknown as Db;
+    const users = createSeed(UserTable, [{ id: "u1", name: "Alice", role: "admin" }]);
+
+    await users.put(db);
+    expect(batchWriteOrThrow.mock.calls[0]?.[1]).toEqual({ parallel: 5 });
+
+    await users.put(db, { parallel: 1, maxStalls: 3 });
+    expect(batchWriteOrThrow.mock.calls[1]?.[1]).toEqual({ parallel: 1, maxStalls: 3 });
+  });
+
+  test(".put throws rather than silently seeding only part of the data", async () => {
+    const batchWriteOrThrow = vi.fn(async () => {
+      throw new DinahError({ type: "BATCH_UNPROCESSED", unprocessed: { users: 1 } });
+    });
+    const db = { makeRepo: () => ({ batchWriteOrThrow }) } as unknown as Db;
+
+    const users = createSeed(UserTable, [{ id: "u1", name: "Alice", role: "admin" }]);
+
+    await expect(users.put(db)).rejects.toThrow(/Batch incomplete/);
   });
 });

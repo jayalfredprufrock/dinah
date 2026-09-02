@@ -15,7 +15,7 @@ It is closer to a **query builder** than an ORM, and it does not encourage singl
 - **Projection-aware return types.** Passing `projection: ["name", "email"]` narrows the return type to exactly those fields. GSI projections (`KEYS_ONLY`, `INCLUDE`, `ALL`) flow through the types, so you never pretend the result has attributes DynamoDB didn't return.
 - **GSI inference.** `queryGsi` knows which partition/sort keys each GSI accepts, which attributes come back, and what shape a valid `startKey` must have.
 - **MongoDB-like query syntax.** Operators like `$gt`, `$between`, `$prefix`, `$exists`, `$in`, `$includes`, and a set of update operators (`$plus`, `$append`, `$setAdd`, `$ifNotExists`, …) compile to DynamoDB expressions under the hood.
-- **Batch & transaction support.** `batchGet` / `batchWrite` automatically chunk and retry unprocessed requests. `trxGet` / `trxWrite` support mixed put / update / delete / condition checks.
+- **Batch & transaction support.** `batchGet` / `batchWrite` / `batchUpdate` chunk automatically, retry unprocessed requests with exponential backoff, and can run requests in parallel. `trxGet` / `trxWrite` support mixed put / update / delete / condition checks.
 - **Pagination.** Every paginating read has an async iterator twin (`queryPaged`, `scanPaged`, `queryGsiPaged`, `scanGsiPaged`).
 - **Repos you can extend.** Extend `makeRepo(table, config)` to map or derive fields via `transformOutput` / `computedAttributes`, attach default values via `defaultCreateData` / `defaultUpdateData`, or expose custom methods on a typed repo.
 

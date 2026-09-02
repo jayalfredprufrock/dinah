@@ -1,3 +1,4 @@
+import type { DbBatchOptions } from "./db.types";
 import type { RepoBase } from "./repo";
 import type { Table } from "./table";
 import type {
@@ -402,7 +403,7 @@ export type RepoTrxWriteRequest<R extends RepoBase> =
 
 // batch get ----------------------------------------------------------------------------------------
 
-export interface RepoBatchGetOptions<R extends RepoBase> {
+export interface RepoBatchGetOptions<R extends RepoBase> extends DbBatchOptions {
   consistent?: boolean;
   projection?: Projection<R>;
   filter?: Partial<R["$schema"]>;
@@ -435,6 +436,10 @@ export type RepoBatchWrite<R extends RepoBase> = (
 )[];
 
 export type RepoBatchWriteResult<R extends RepoBase> = {
+  /**
+   * @deprecated Always `undefined`. `BatchWriteItem` does not return the items
+   * it wrote, so this has never been populated. Will be removed in a future minor.
+   */
   items: RepoPutItem<R>[];
   unprocessed?: RepoBatchWrite<R>;
 };

@@ -1,6 +1,6 @@
 import type { Db } from "./db";
 import type { Table } from "./table";
-import type { DbTrxGetRequest, DbTrxWriteRequest } from "./db.types";
+import type { DbBatchOptions, DbTrxGetRequest, DbTrxWriteRequest } from "./db.types";
 import type {
   GsiNames,
   RepoBatchGetOptions,
@@ -529,14 +529,18 @@ export class Repo<
     keys: RepoKey<Self>[],
     options?: O,
   ): Promise<RepoBatchGetResult<Self, O>> {
-    const { filter, ...restOptions } = (options ?? {}) as RepoBatchGetOptions<Self>;
-    const { items, unprocessed } = await this.db.batchGet({
-      [this.tableName]: {
-        keys: keys.map((key) => this.extractKey(key)),
-        filter,
-        ...restOptions,
-      },
-    } as any);
+    const { filter, parallel, maxStalls, baseDelay, chunkSize, ...restOptions } = (options ??
+      {}) as RepoBatchGetOptions<Self>;
+    const { items, unprocessed } = await this.db.batchGet(
+      {
+        [this.tableName]: {
+          keys: keys.map((key) => this.extractKey(key)),
+          filter,
+          ...restOptions,
+        },
+      } as any,
+      { parallel, maxStalls, baseDelay, chunkSize },
+    );
     const tableItems = items[this.tableName];
     return {
       items: (tableItems && this.applyTransformsIfNeeded(tableItems, options)) as any,
@@ -548,28 +552,30 @@ export class Repo<
     keys: RepoKey<Self>[],
     options?: O,
   ): Promise<RepoBatchGetOrThrowResult<Self, O>> {
-    const { filter, ...restOptions } = (options ?? {}) as RepoBatchGetOptions<Self>;
-    const result = await this.db.batchGetOrThrow({
-      [this.tableName]: {
-        keys: keys.map((key) => this.extractKey(key)),
-        resource: this.resourceName,
-        filter,
-        ...restOptions,
-      },
-    } as any);
+    const { filter, parallel, maxStalls, baseDelay, chunkSize, ...restOptions } = (options ??
+      {}) as RepoBatchGetOptions<Self>;
+    const result = await this.db.batchGetOrThrow(
+      {
+        [this.tableName]: {
+          keys: keys.map((key) => this.extractKey(key)),
+          resource: this.resourceName,
+          filter,
+          ...restOptions,
+        },
+      } as any,
+      { parallel, maxStalls, baseDelay, chunkSize },
+    );
     return this.applyTransformsIfNeeded(result[this.tableName] ?? [], options) as any;
   }
 
-  async batchWrite(requests: RepoBatchWrite<Self>): Promise<RepoBatchWriteResult<Self>> {
-    const { items, unprocessed } = await this.db.batchWrite({
-      [this.tableName]: requests.map((request) => {
-        if (request.type === "DELETE") {
-          return { type: "DELETE", key: this.extractKey(request.key) };
-        } else {
-          return { type: "PUT", item: request.item };
-        }
-      }),
-    });
+  async batchWrite(
+    requests: RepoBatchWrite<Self>,
+    options?: DbBatchOptions,
+  ): Promise<RepoBatchWriteResult<Self>> {
+    const { items, unprocessed } = await this.db.batchWrite(
+      { [this.tableName]: this.toBatchWriteRequests(requests) },
+      options,
+    );
 
     return {
       items: items[this.tableName],
@@ -577,17 +583,77 @@ export class Repo<
     } as RepoBatchWriteResult<Self>;
   }
 
+  /**
+   * `batchWrite`, but throws a `BATCH_UNPROCESSED` {@link DinahError} instead of
+   * returning leftovers. Prefer this for bulk/operator jobs, where silently
+   * dropping part of the write is worse than failing.
+   */
+  async batchWriteOrThrow(requests: RepoBatchWrite<Self>, options?: DbBatchOptions): Promise<void> {
+    await this.db.batchWriteOrThrow(
+      { [this.tableName]: this.toBatchWriteRequests(requests) },
+      options,
+    );
+  }
+
+  /**
+   * Duplicate keys are rejected rather than deduplicated.
+   *
+   * DynamoDB refuses a batch containing two operations on one item, and
+   * chunking makes that position-dependent today: repeats inside a single
+   * 25-item chunk raise a ValidationException, while repeats straddling a
+   * boundary quietly both apply. Failing consistently is better than either.
+   *
+   * Collapsing them isn't a safe alternative. A PUT and a DELETE for the same
+   * key have no meaningful merge, and honouring "last write wins" would require
+   * ordered chunks — which `parallel` explicitly gives up. Deduplicating here
+   * would advertise semantics this can't guarantee, so the caller keeps the
+   * choice.
+   *
+   * This lives on `Repo` because it needs the table's key schema; `Db` receives
+   * raw PUT items and can't tell which attributes form the key.
+   */
+  private toBatchWriteRequests(requests: RepoBatchWrite<Self>) {
+    const { partitionKey, sortKey } = this.table.def;
+    const keyNames = sortKey ? [partitionKey, sortKey] : [partitionKey];
+    const seen = new Set<string>();
+
+    return requests.map((request) => {
+      const source = request.type === "DELETE" ? request.key : request.item;
+      const key = this.extractKey(source as RepoKey<Self>) as Obj;
+      const identity = keyNames.map((name) => JSON.stringify(key[name])).join("\u0000");
+
+      if (seen.has(identity)) {
+        throw new DinahError({
+          type: "VALIDATION",
+          message:
+            `batchWrite received more than one request for the same key in "${this.tableName}": ` +
+            `${JSON.stringify(key)}. DynamoDB rejects a batch containing two operations on one ` +
+            `item; deduplicate before calling, keeping whichever request should win.`,
+        });
+      }
+      seen.add(identity);
+
+      return request.type === "DELETE"
+        ? { type: "DELETE" as const, key }
+        : { type: "PUT" as const, item: request.item };
+    });
+  }
+
   async batchUpdate(
     keys: RepoKey<Self>[],
     update: RepoUpdateInput<Self>,
+    options?: DbBatchOptions,
   ): Promise<RepoBatchUpdateResult<Self>> {
     const updateWithDefaults = this.applyNormalizersToExpression(update as Obj);
-    const result = await this.db.batchUpdate({
-      [this.tableName]: {
-        keys: keys.map((key) => this.extractKey(key)),
-        update: updateWithDefaults as any,
-      },
-    } as any);
+    const result = await this.db.batchUpdate(
+      {
+        [this.tableName]: {
+          keys: keys.map((key) => this.extractKey(key)),
+          update: updateWithDefaults as any,
+        },
+      } as any,
+      options,
+    );
     return {
       unprocessed: result.unprocessed?.[this.tableName]?.keys as RepoKey<Self>[] | undefined,
     };

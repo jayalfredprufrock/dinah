@@ -98,6 +98,44 @@ export interface DbBatchGetRequest<T = Obj> {
 
 export type DbBatchGet = Obj<DbBatchGetRequest>;
 
+/** Tuning shared by `batchGet` / `batchWrite` / `batchUpdate`. */
+export interface DbBatchOptions {
+  /**
+   * Requests in flight at once. Defaults to 5. Only has an effect above one
+   * chunk of work (25 items for writes/updates, 100 keys for gets), so small
+   * request-path batches behave exactly as they did when serial.
+   *
+   * Parallelism only helps when keys spread across partitions — sequential or
+   * timestamp-prefixed keys concentrate on one partition, where extra
+   * concurrency just produces more throttling. Note also that the AWS SDK
+   * defaults to 50 max sockets per client, so values beyond that queue in the
+   * HTTP agent rather than adding real parallelism.
+   */
+  parallel?: number;
+  /**
+   * Consecutive passes that accept *zero* items before giving up and returning
+   * the remainder as `unprocessed`. Defaults to 10, which with the default
+   * backoff is roughly 45s of retrying. Passes that make any progress don't
+   * count against this.
+   */
+  maxStalls?: number;
+  /** Base backoff delay in ms between passes that were partially throttled. Defaults to 50. */
+  baseDelay?: number;
+  /**
+   * Items per request. Defaults to — and is clamped to — DynamoDB's maximum: 25
+   * for `batchWrite` / `batchUpdate`, 100 for `batchGet`.
+   *
+   * Worth lowering only for consistently large items on `batchWrite`. Once
+   * items are big enough that the table accepts fewer than 25 per call (above
+   * roughly 160KB), the rejected remainder is re-uploaded on the next pass —
+   * about 2.5x the payload at 400KB items. Setting this to the number the table
+   * actually accepts removes that waste without costing round trips, since how
+   * many items land per call is set by capacity rather than chunk size. Setting
+   * it *below* that number does cost round trips.
+   */
+  chunkSize?: number;
+}
+
 export interface DbBatchGetResponse {
   items: Obj<Obj[]>;
   unprocessed?: DbBatchGet;
@@ -116,6 +154,10 @@ export interface DbBatchPutRequest {
 export type DbBatchWrite = Obj<(DbBatchDeleteRequest | DbBatchPutRequest)[]>;
 
 export interface DbBatchWriteResponse {
+  /**
+   * @deprecated Always empty. `BatchWriteItem` does not return the items it
+   * wrote, so this has never been populated. Will be removed in a future minor.
+   */
   items: Obj<Obj[]>;
   unprocessed?: DbBatchWrite;
 }

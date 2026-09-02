@@ -264,7 +264,7 @@ batchGet(keys: Key[], options?: {
 }>
 ```
 
-Batch-fetches up to any number of items — Dinah chunks and retries under the hood (see [`Db.batchGet`](/reference/db/#batchgetdata)). Results preserve input order. The `filter` option is applied client-side as a partial match.
+Batch-fetches up to any number of items — Dinah chunks and retries under the hood (see [`Db.batchGet`](/reference/db/#batchgetdata)). Duplicate keys are deduplicated, and results preserve input order by each key's first occurrence. The `filter` option is applied client-side as a partial match.
 
 ### `batchGetOrThrow(keys, options?)`
 
@@ -274,19 +274,27 @@ batchGetOrThrow(keys: Key[], options?): Promise<Item[]>
 
 Returns the items directly and throws if any key was missing or unprocessed.
 
-### `batchWrite(requests)`
+### `batchWrite(requests, options?)`
 
 ```typescript
 batchWrite(requests: Array<
   | { type: "PUT"; item: PutItem }
   | { type: "DELETE"; key: Key }
->): Promise<{
-  items: PutItem[];
+>, options?: DbBatchOptions): Promise<{
+  items: PutItem[]; // deprecated — always undefined
   unprocessed?: Array<{ type: "PUT"; item } | { type: "DELETE"; key }>;
 }>
 ```
 
-Mixes put and delete requests for a single table. Puts are raw writes (no `defaultCreateData` / input transforms). See [Batch & Transactions](/guides/batch-and-transactions/#batch-writes) for retry semantics.
+Mixes put and delete requests for a single table. Puts are raw writes (no `defaultCreateData` / input transforms). Two requests for the same key throw a `VALIDATION` `DinahError` — see [Duplicate keys](/guides/batch-and-transactions/#duplicate-keys). See [Batch & Transactions](/guides/batch-and-transactions/#batch-writes) for retry semantics and [`DbBatchOptions`](/reference/db/#dbbatchoptions) for tuning.
+
+### `batchWriteOrThrow(requests, options?)`
+
+```typescript
+batchWriteOrThrow(requests: RepoBatchWrite, options?: DbBatchOptions): Promise<void>
+```
+
+Same as `batchWrite`, but throws a `BATCH_UNPROCESSED` `DinahError` instead of returning leftovers a caller might ignore. Prefer this for bulk and operator-run jobs.
 
 ## Transactions
 

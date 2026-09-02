@@ -24,7 +24,15 @@ const users = createSeed(UserTable, [
 await users.put(db);
 ```
 
-`.put(db)` writes every item to the table via a batched `PUT` (`db.makeRepo(table).batchWrite(...)`), which overwrites by primary key and is chunked and retried under the hood. Because it is a raw `PUT`, seed items must be complete — repo-config defaults, `transformAttributes`, and `computedAttributes` are **not** applied (see [Subclassing Repos](/guides/subclassing-repos/)).
+`.put(db)` writes every item to the table via a batched `PUT` (`db.makeRepo(table).batchWriteOrThrow(...)`), which overwrites by primary key and is chunked and retried under the hood. Because it is a raw `PUT`, seed items must be complete — repo-config defaults, `transformAttributes`, and `computedAttributes` are **not** applied (see [Subclassing Repos](/guides/subclassing-repos/)).
+
+If the table could not accept every item, `.put` throws a `BATCH_UNPROCESSED` `DinahError` rather than reporting success — a seed that silently wrote only part of its data is worse than one that fails, since everything downstream assumes it completed.
+
+Unlike `batchWrite`, which is serial by default, `.put` writes with `parallel: 5`: seeding is a single process, off the request path, and usually the only thing touching the table. It accepts the same [batch options](/guides/batch-and-transactions/#throttling--throughput), so a large seed can be tuned further:
+
+```typescript
+await users.put(db, { parallel: 10 });
+```
 
 ## The `.items` getter
 
@@ -50,6 +58,19 @@ await posts.put(db);
 ```
 
 Reach for a **thunk** (`() => Item[]`) only when the reference can't be resolved at definition time — forward or mutual references, where the other seed is declared later. The thunk defers evaluation until `.items` (or `.put`) is called, by which point every seed exists; an eager array reference to a not-yet-declared seed throws `Cannot access '…' before initialization`. Either way, consistency falls out of `.items` being memoized — every reader sees the same resolved items.
+
+> **The thunk form loses excess-property checks.** Because its items live inside a function's inferred return, TypeScript validates them by assignability rather than as fresh literals, so a stray or misspelled optional field is accepted silently. (Missing required fields and wrong-typed fields are still caught, and the array form is fully checked — this only affects the thunk.) It's a TypeScript limitation, not something the API can work around. Restore strict checking by appending `satisfies Post[]` to the returned array, where `Post` is your table's item type — the `Static<typeof PostSchema>` you already have (or `SeedItem<typeof PostTable>`):
+>
+> ```typescript
+> // Usually the `Static<typeof PostSchema>` you already used to define the table;
+> // `SeedItem<typeof PostTable>` resolves to the same shape if you don't have it handy.
+> type Post = Static<typeof PostSchema>;
+>
+> const posts = createSeed(
+>   PostTable,
+>   () => [{ postId: "p1", authorId: users.items[0].userId, title: "Hello" }] satisfies Post[],
+> );
+> ```
 
 Write order does not affect referential correctness — DynamoDB has no foreign keys, so a reference is only dangling if you forget to `put` the seed it points at. Just make sure every referenced seed is written.
 
