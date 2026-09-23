@@ -896,6 +896,8 @@ export class Repo<
           result[key] = fn(val);
         } else if (val.$set !== undefined) {
           result[key] = { ...val, $set: fn(val.$set) };
+        } else if (val.$literal !== undefined) {
+          result[key] = { ...val, $literal: fn(val.$literal) };
         } else if (val.$ifNotExists !== undefined) {
           const ifne = val.$ifNotExists as unknown;
           result[key] = {
@@ -935,6 +937,8 @@ export class Repo<
               args.push(val);
             } else if (val.$set !== undefined) {
               args.push(val.$set);
+            } else if (val.$literal !== undefined) {
+              args.push(val.$literal);
             } else {
               throw new DinahError({
                 type: "VALIDATION",
@@ -956,6 +960,8 @@ export class Repo<
             resolvedVal = val;
           } else if (val.$set !== undefined) {
             resolvedVal = val.$set;
+          } else if (val.$literal !== undefined) {
+            resolvedVal = val.$literal;
           } else {
             throw new DinahError({
               type: "VALIDATION",

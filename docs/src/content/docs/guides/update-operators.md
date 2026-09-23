@@ -99,6 +99,17 @@ The plain-value form is already a `SET`, but you can use `$set` explicitly when 
 }
 ```
 
+## Literal values: `$literal`
+
+An object whose keys all start with `$` is read as an operator. To write one as a value, wrap it in `$literal`:
+
+```typescript
+// meta = { $views: 3 }
+await repo.update({ postId: "p1" }, { meta: { $literal: { $views: 3 } } });
+```
+
+`$literal` nests like `$set`, e.g. `{ $ifNotExists: { $literal: { $views: 0 } } }`. Empty objects (`{}`) are always values and need no wrapping.
+
 ## List operations: `$append` and `$prepend`
 
 These compile to `list_append`:

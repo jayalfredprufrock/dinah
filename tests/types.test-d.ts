@@ -1227,6 +1227,12 @@ describe("update expression typing — valid expressions", () => {
     await condRepo.update({ userId: "u1" }, { age: { $ifNotExists: 42 } });
   });
 
+  test("$literal with matching value type", async () => {
+    await condRepo.update({ userId: "u1" }, { name: { $literal: "x" } });
+    // @ts-expect-error — $literal operand must match the field type
+    await condRepo.update({ userId: "u1" }, { name: { $literal: 1 } });
+  });
+
   test("$ifNotExists with [field, value]", async () => {
     await condRepo.update({ userId: "u1" }, { age: { $ifNotExists: ["score", 42] } });
   });

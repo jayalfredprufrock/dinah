@@ -15,7 +15,8 @@ const comparatorOps: Obj<string> = {
 
 export const isOperation = (val: unknown): val is Obj => {
   if (!val || typeof val !== "object" || Array.isArray(val)) return false;
-  return Object.keys(val).every((op) => op.startsWith("$"));
+  const keys = Object.keys(val);
+  return keys.length > 0 && keys.every((op) => op.startsWith("$"));
 };
 
 export class ExpressionBuilder {
@@ -252,14 +253,18 @@ export class ExpressionBuilder {
 
   protected resolveSetOperand(path: string, operand: unknown): string {
     if (isOperation(operand)) {
-      if (operand.$ifNotExists) {
+      if (operand.$literal !== undefined) {
+        return this.getValueSub(operand.$literal);
+      }
+
+      if (operand.$ifNotExists !== undefined) {
         const params = Array.isArray(operand.$ifNotExists)
           ? operand.$ifNotExists
           : [path, operand.$ifNotExists];
         return `if_not_exists(${this.getPathSub(params[0])}, ${this.resolveSetOperand(path, params[1])})`;
       }
 
-      if (operand.$set) {
+      if (operand.$set !== undefined) {
         return this.resolveSetOperand(path, operand.$set);
       }
 
@@ -313,6 +318,10 @@ export class ExpressionBuilder {
 
   protected resolvePartiQLSetOperand(path: string, operand: unknown, params: unknown[]): string {
     if (isOperation(operand)) {
+      if (operand.$literal !== undefined) {
+        params.push(operand.$literal);
+        return "?";
+      }
       if (operand.$set !== undefined) {
         return this.resolvePartiQLSetOperand(path, operand.$set, params);
       }

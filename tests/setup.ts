@@ -11,6 +11,7 @@ export const UserSchema = Type.Object({
   role: Type.String(),
   age: Type.Optional(Type.Number()),
   tags: Type.Optional(Type.Array(Type.String())),
+  meta: Type.Optional(Type.Record(Type.String(), Type.Number())),
   createdAt: Type.Number(),
   updatedAt: Type.Optional(Type.Number()),
 });

@@ -229,6 +229,7 @@ interface UpdateListOps<E> {
 
 interface UpdateCommonOps<V> {
   $set?: V;
+  $literal?: V;
   $ifNotExists?: V | [string, V];
   $setAdd?: V | V[];
   $setDel?: V | V[];

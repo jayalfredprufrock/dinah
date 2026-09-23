@@ -205,6 +205,19 @@ describe("update", () => {
     expect(result!.age).toBe(42);
   });
 
+  test("update with $literal writes an object with only $ keys", async () => {
+    await userRepo.update({ userId: "u1" }, { meta: { $literal: { $views: 3 } } });
+    const result = await userRepo.get({ userId: "u1" });
+    expect(result!.meta).toEqual({ $views: 3 });
+  });
+
+  test("update with $ifNotExists writes an empty object", async () => {
+    await userRepo.update({ userId: "u1" }, { meta: { $remove: true } });
+    await userRepo.update({ userId: "u1" }, { meta: { $ifNotExists: {} } });
+    const result = await userRepo.get({ userId: "u1" });
+    expect(result!.meta).toEqual({});
+  });
+
   test("update with $append appends to a list", async () => {
     await userRepo.update({ userId: "u1" }, { tags: ["a"] });
     await userRepo.update({ userId: "u1" }, { tags: { $append: "b" } });
@@ -920,6 +933,12 @@ describe("transformAttributes", () => {
     const result = await transformRepo.get({ id: "ft-1" });
     expect(result!.email).toBe("set@email.com");
   });
+
+  test("update applies field transform to $literal value", async () => {
+    await transformRepo.update({ id: "ft-1" }, { email: { $literal: "LIT@EMAIL.COM" } });
+    const result = await transformRepo.get({ id: "ft-1" });
+    expect(result!.email).toBe("lit@email.com");
+  });
 });
 
 describe("computedAttributes", () => {
@@ -939,6 +958,13 @@ describe("computedAttributes", () => {
     await transformRepo.update({ id: "cf-1" }, { expiresAt: 9000 });
     const result = await transformRepo.get({ id: "cf-1" });
     expect(result!.ttl).toBe(9);
+  });
+
+  test("update recomputes derived field from $literal source", async () => {
+    await transformRepo.create({ id: "cf-lit", email: "a@b.com", expiresAt: 1000 });
+    await transformRepo.update({ id: "cf-lit" }, { expiresAt: { $literal: 7000 } });
+    const result = await transformRepo.get({ id: "cf-lit" });
+    expect(result!.ttl).toBe(7);
   });
 
   test("update leaves derived field untouched when source is not updated", async () => {
