@@ -463,12 +463,55 @@ export type RepoBatchUpdateResult<R extends RepoBase> = {
 export type RepoBatchDeleteRequest<R extends RepoBase> = RepoKey<R>[];
 export type RepoBatchDeleteResponse<R extends RepoBase> = RepoBatchDeleteRequest<R> | undefined;
 
+// strict options --------------------------------------------------------------------------------
+
+// An object type (rather than a string/never) so intersecting it with the inferred value
+// can't collapse the whole options object to `never`; the error then names the key.
+type Unknown<What extends string, K> = { [M in `Unknown ${What} "${K & string}"`]: never };
+
+// (separate alias so the mapped type is homomorphic and preserves tuples/arrays)
+type StrictFilters<A, T> = { [I in keyof A]: StrictFilter<A[I], T> };
+
+/** Maps an inferred filter to itself, replacing fields unknown to `T` (at any depth) with an error type. */
+export type StrictFilter<F, T> = {
+  [K in keyof F]: K extends "$and" | "$or"
+    ? StrictFilters<F[K], T>
+    : K extends "$not"
+      ? StrictFilter<F[K], T>
+      : K extends AllKeys<T>
+        ? F[K]
+        : Unknown<"field", K>;
+};
+
+/**
+ * Maps options inferred from a literal (via a `const` type parameter) to themselves,
+ * replacing option names unknown to `Base`, and filter fields unknown to `T`, with an
+ * error type. Intersect it with the inferred options to reject unknown keys, which
+ * inference otherwise doesn't check.
+ */
+export type StrictOptions<O, Base, T> = {
+  [K in keyof O]: K extends "filter"
+    ? StrictFilter<O[K], T>
+    : K extends AllKeys<Base>
+      ? O[K]
+      : Unknown<"option", K>;
+};
+
 // discriminator narrowing -----------------------------------------------------------------------
 
+type DiscriminatorLiteral = string | number | boolean;
+
+// literal(s) from a shorthand `$eq`, `{ $eq: literal }` or `{ $in: [literals] }` condition
+type DiscriminatorOperand<C> = C extends DiscriminatorLiteral
+  ? C
+  : C extends { $eq: infer L extends DiscriminatorLiteral }
+    ? L
+    : C extends { $in: readonly (infer L extends DiscriminatorLiteral)[] }
+      ? L
+      : never;
+
 type ExtractDiscriminatorValue<Q, D extends keyof any> = D extends keyof Q
-  ? Q[D] extends string | number | boolean
-    ? Q[D]
-    : never
+  ? DiscriminatorOperand<Q[D]>
   : never;
 
 // Extracts the filter object from options (non-function, non-undefined only)

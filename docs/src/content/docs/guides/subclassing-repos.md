@@ -177,23 +177,25 @@ so use the **`$self` phantom** on the base repo type to write a matching signatu
 
 ```typescript
 import { makeRepo, Repo } from "dinah";
-import type { RepoKey, RepoGetOptions, RepoGetResult } from "dinah";
+import type { RepoKey, RepoGetOptions, RepoGetResult, StrictOptions } from "dinah";
 
 type Self = Repo<typeof PostTable>["$self"];
 
 class PostRepo extends makeRepo(PostTable) {
   override async get<const O extends RepoGetOptions<Self>>(
     key: RepoKey<Self>,
-    options?: O,
+    options?: O & StrictOptions<O, RepoGetOptions<Self>, Self["$schema"]>,
   ): Promise<RepoGetResult<Self, O>> {
     // custom logic here
-    return super.get(key, options);
+    return super.get<O>(key, options);
   }
 }
 ```
 
 Callers of the override still get precise per-call types (projections, filters, and
-so on). If you don't need to change the signature, prefer wrapping the base method in
+so on), and unknown option names or filter fields are still rejected. Type `options`
+with `StrictOptions` like the base method does, and pass `O` explicitly when calling
+`super`: TypeScript can't infer it through `StrictOptions` on its own. If you don't need to change the signature, prefer wrapping the base method in
 a new domain method (see [Domain methods](#domain-methods)) rather than overriding —
 it's simpler and needs no `$self` annotation.
 

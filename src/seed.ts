@@ -101,8 +101,13 @@ export class Seed<T extends Table = Table> {
  * await posts.put(db);
  * ```
  */
-export const createSeed = <T extends Table>(table: T, items: SeedInput<T>): Seed<T> =>
-  new Seed(table, items);
+// NoInfer: infer the table type from `table` only. Inferring it back through the items
+// (or from a contextual return type) means relating typebox's Static over an unresolved
+// type parameter, which costs ~1M type instantiations per call site.
+export const createSeed = <T extends Table>(
+  table: T,
+  items: NoInfer<SeedInput<T>>,
+): NoInfer<Seed<T>> => new Seed(table, items);
 
 /**
  * Type guard identifying a {@link Seed}. Prefer this over `instanceof Seed` when

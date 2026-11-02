@@ -9,6 +9,7 @@ import type {
   RepoKey,
   RepoQueryGsiQuery,
   RepoUpdateInputFor,
+  StrictOptions,
 } from "../src/repo.types";
 
 const Schema = Type.Object({
@@ -334,9 +335,9 @@ describe("base methods keep type safety inside subclass method bodies", () => {
     class LogRepo extends makeRepo(logTable) {
       override async get<const O extends RepoGetOptions<Self>>(
         key: RepoKey<Self>,
-        options?: O,
+        options?: O & StrictOptions<O, RepoGetOptions<Self>, Self["$schema"]>,
       ): Promise<RepoGetResult<Self, O>> {
-        return super.get(key, options);
+        return super.get<O>(key, options);
       }
     }
     // Callers still get precise per-call types through the override.
@@ -345,6 +346,9 @@ describe("base methods keep type safety inside subclass method bodies", () => {
     expectTypeOf(repo.get({ id: "a" }, { projection: ["id", "message"] })).resolves.toEqualTypeOf<
       Pick<Log, "id" | "message"> | undefined
     >();
+    // ...and unknown option names are still rejected through the override
+    // @ts-expect-error — "fitler" is not an option
+    void repo.get({ id: "a" }, { fitler: { message: "x" } });
   });
 
   // Non-generic base methods override cleanly with a plain `this`-based signature.
@@ -1433,6 +1437,31 @@ describe("GSI queries preserve union variants", () => {
     expectTypeOf(result).toEqualTypeOf<Simplify<ZooCatGsi>[]>();
   });
 
+  test("narrows by $eq and $in discriminator filters", async () => {
+    expectTypeOf(await zooRepo.scan({ filter: { kind: { $eq: "dog" } } })).toEqualTypeOf<
+      ZooDog[]
+    >();
+    expectTypeOf(await zooRepo.scan({ filter: { kind: { $in: ["cat"] } } })).toEqualTypeOf<
+      ZooCat[]
+    >();
+    expectTypeOf(await zooRepo.scan({ filter: { kind: { $in: ["cat", "dog"] } } })).toEqualTypeOf<
+      (ZooCat | ZooDog)[]
+    >();
+  });
+
+  test("does not narrow by negated or non-literal discriminator filters", async () => {
+    expectTypeOf(await zooRepo.scan({ filter: { kind: { $ne: "dog" } } })).toEqualTypeOf<
+      (ZooCat | ZooDog)[]
+    >();
+    expectTypeOf(await zooRepo.scan({ filter: { kind: { $nin: ["dog"] } } })).toEqualTypeOf<
+      (ZooCat | ZooDog)[]
+    >();
+    const kinds: ("cat" | "dog")[] = ["cat"];
+    expectTypeOf(await zooRepo.scan({ filter: { kind: { $in: kinds } } })).toEqualTypeOf<
+      (ZooCat | ZooDog)[]
+    >();
+  });
+
   test("scanGsi preserves union variants too", async () => {
     const result = await zooRepo.scanGsi("byKind");
     expectTypeOf(result).toEqualTypeOf<Simplify<ZooCatGsi | ZooDogGsi>[]>();
@@ -1722,5 +1751,40 @@ describe("transformOutput type is used directly (class instances preserved)", ()
   test("a projection still narrows to the picked schema fields (transform skipped)", async () => {
     const r = await modelRepo.get({ pk: "a", sk: "b" }, { projection: ["pk", "title"] });
     expectTypeOf(r).toEqualTypeOf<Simplify<Pick<Item, "pk" | "title">> | undefined>();
+  });
+});
+
+describe("unknown option names and filter fields are rejected", () => {
+  test("option names", () => {
+    // @ts-expect-error — "fitler" is not an option
+    void repo.query({ pk: "a" }, { fitler: { title: "x" } });
+    // @ts-expect-error — "consistantRead" is not an option
+    void repo.get({ pk: "a", sk: "b" }, { consistantRead: true });
+    // @ts-expect-error — "nope" is not an option
+    void repo.scan({ limit: 1, nope: 1 });
+    // @ts-expect-error — "nope" is not an option
+    void repo.queryGsi("allGsi", { gsiPk: "a" }, { nope: 1 });
+  });
+
+  test("filter fields, at any depth", () => {
+    // @ts-expect-error — "titel" is not a field
+    void repo.query({ pk: "a" }, { filter: { title: "x", titel: "y" } });
+    // @ts-expect-error — "titel" is not a field
+    void repo.scan({ filter: { $or: [{ title: "x" }, { titel: "y" }] } });
+    // @ts-expect-error — "titel" is not a field
+    void repo.scan({ filter: { $and: [{ title: "x", titel: "y" }] } });
+    // @ts-expect-error — "titel" is not a field
+    void repo.scan({ filter: { $not: { title: "x", titel: "y" } } });
+    // @ts-expect-error — "titel" is not a field
+    void repo.getGsi("allGsi", { gsiPk: "a", gsiSk: 1 }, { filter: { titel: "y" } });
+  });
+
+  test("valid options and filters (including variant fields of unions) still compile", async () => {
+    await repo.query(
+      { pk: "a" },
+      { filter: { $or: [{ title: "x" }, { body: { $includes: "y" } }] }, projection: ["pk"] },
+    );
+    await zooRepo.scan({ filter: { meow: "x" }, limit: 10 });
+    await zooRepo.scan({ filter: { $or: [{ meow: "x" }, { bark: { $gt: 1 } }] } });
   });
 });

@@ -205,8 +205,10 @@ type FieldCondition<T> = {
  * Full condition expression with compound operators.
  */
 export type Condition<T> = FieldCondition<T> & {
-  $and?: Condition<T>[];
-  $or?: Condition<T>[];
+  // readonly so filters inferred via `const` type parameters keep per-element types
+  // (see StrictFilter); mutable arrays are still accepted
+  $and?: readonly Condition<T>[];
+  $or?: readonly Condition<T>[];
   $not?: Condition<T>;
 };
 

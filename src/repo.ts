@@ -44,6 +44,7 @@ import type {
   RepoUpdateResult,
   RepoQueryGsiQuery,
   RepoQueryQuery,
+  StrictOptions,
 } from "./repo.types";
 import type { AllKeys, Condition, ExtractTableDef, ExtractTableSchema, Obj } from "./types";
 import { isOperation } from "./expression-builder";
@@ -113,7 +114,10 @@ export interface RepoConfig<
   defaultUpdateData?: () => TUpdateDefaults;
   transformAttributes?: { [K in keyof TSchema]?: (val: TSchema[K]) => TSchema[K] };
   computedAttributes?: TComputed & { [K in keyof TSchema]?: ComputedFieldDef<TSchema, K> };
-  transformOutput?: (item: TSchema) => TOutput;
+  // NoInfer: infer the table type from `table` only. Inferring it back through this
+  // (context-sensitive) callback means relating typebox's Static over an unresolved
+  // type parameter, which costs ~1M type instantiations per repo.
+  transformOutput?: (item: NoInfer<TSchema>) => TOutput;
   immutableAttributes?: readonly TImmutable[];
 }
 
@@ -183,9 +187,10 @@ export class Repo<
   // write its signature against `<BaseRepoType>["$self"]`, e.g.:
   //   class LogRepo extends makeRepo(logTable) {
   //     override async get<const O extends RepoGetOptions<Repo<typeof logTable>["$self"]>>(
-  //       key: RepoKey<Repo<typeof logTable>["$self"]>, options?: O,
+  //       key: RepoKey<Repo<typeof logTable>["$self"]>,
+  //       options?: O & StrictOptions<O, RepoGetOptions<Repo<typeof logTable>["$self"]>, Repo<typeof logTable>["$self"]["$schema"]>,
   //     ): Promise<RepoGetResult<Repo<typeof logTable>["$self"], O>> {
-  //       return super.get(key, options);
+  //       return super.get<O>(key, options);
   //     }
   //   }
   declare readonly $self: Self;
@@ -270,7 +275,7 @@ export class Repo<
 
   async get<const O extends RepoGetOptions<Self>>(
     key: RepoKey<Self>,
-    options?: O,
+    options?: O & StrictOptions<O, RepoGetOptions<Self>, Self["$schema"]>,
   ): Promise<RepoGetOrThrowResult<Self, O> | undefined> {
     const { filter, ...restOptions } = (options ?? {}) as RepoGetOptions<Self>;
     const item = await this.db.get({
@@ -284,7 +289,7 @@ export class Repo<
 
   async getOrThrow<const O extends RepoGetOptions<Self>>(
     key: RepoKey<Self>,
-    options?: O,
+    options?: O & StrictOptions<O, RepoGetOptions<Self>, Self["$schema"]>,
   ): Promise<RepoGetOrThrowResult<Self, O>> {
     const { filter, ...restOptions } = (options ?? {}) as RepoGetOptions<Self>;
     const item = await this.db.getOrThrow({
@@ -386,7 +391,7 @@ export class Repo<
 
   async query<const O extends RepoQueryOptions<Self>>(
     query: RepoQueryQuery<Self>,
-    options?: O,
+    options?: O & StrictOptions<O, RepoQueryOptions<Self>, Self["$schema"]>,
   ): Promise<RepoQueryResult<Self, O>> {
     const items = await this.db.query({ table: this.tableName, query, ...options } as any);
     return this.applyTransformsIfNeeded(items, options) as any;
@@ -394,7 +399,7 @@ export class Repo<
 
   async *queryPaged<const O extends RepoQueryOptions<Self>>(
     query: RepoQueryQuery<Self>,
-    options?: O,
+    options?: O & StrictOptions<O, RepoQueryOptions<Self>, Self["$schema"]>,
   ): RepoQueryPagedResult<Self, O> {
     for await (const page of this.db.queryPaged({
       table: this.tableName,
@@ -408,7 +413,7 @@ export class Repo<
   async queryGsi<G extends GsiNames<Self>, const O extends RepoQueryGsiOptions<Self, T, G>>(
     gsi: G,
     query: RepoQueryGsiQuery<T, G>,
-    options?: O,
+    options?: O & StrictOptions<O, RepoQueryGsiOptions<Self, T, G>, Self["$schema"]>,
   ): Promise<RepoQueryGsiResult<Self, O, G>> {
     const items = await this.db.query({
       table: this.tableName,
@@ -422,7 +427,7 @@ export class Repo<
   async *queryGsiPaged<G extends GsiNames<Self>, const O extends RepoQueryGsiOptions<Self, T, G>>(
     gsi: G,
     query: RepoQueryGsiQuery<T, G>,
-    options?: O,
+    options?: O & StrictOptions<O, RepoQueryGsiOptions<Self, T, G>, Self["$schema"]>,
   ): RepoQueryGsiPagedResult<Self, O, G> {
     for await (const page of this.db.queryPaged({
       table: this.tableName,
@@ -437,7 +442,7 @@ export class Repo<
   async getGsi<G extends GsiNames<Self>, const O extends RepoGetGsiOptions<Self, T, G>>(
     gsi: G,
     query: RepoQueryGsiQuery<T, G>,
-    options?: O,
+    options?: O & StrictOptions<O, RepoGetGsiOptions<Self, T, G>, Self["$schema"]>,
   ): Promise<RepoGetGsiOrThrowResult<Self, O, G> | undefined> {
     const { filter, ...restOptions } = (options ?? {}) as RepoGetGsiOptions<Self, T, G>;
     const items = await this.db.query({
@@ -461,9 +466,9 @@ export class Repo<
   async getGsiOrThrow<G extends GsiNames<Self>, const O extends RepoGetGsiOptions<Self, T, G>>(
     gsi: G,
     query: RepoQueryGsiQuery<T, G>,
-    options?: O,
+    options?: O & StrictOptions<O, RepoGetGsiOptions<Self, T, G>, Self["$schema"]>,
   ): Promise<RepoGetGsiOrThrowResult<Self, O, G>> {
-    const item = await this.getGsi(gsi, query, options);
+    const item = await this.getGsi<G, O>(gsi, query, options);
     if (item === undefined) {
       throw new DinahError({
         type: "NOT_FOUND",
@@ -474,13 +479,15 @@ export class Repo<
     return item as any;
   }
 
-  async scan<const O extends RepoScanOptions<Self>>(options?: O): Promise<RepoScanResult<Self, O>> {
+  async scan<const O extends RepoScanOptions<Self>>(
+    options?: O & StrictOptions<O, RepoScanOptions<Self>, Self["$schema"]>,
+  ): Promise<RepoScanResult<Self, O>> {
     const items = await this.db.scan({ table: this.tableName, ...options });
     return this.applyTransformsIfNeeded(items, options) as any;
   }
 
   async *scanPaged<const O extends RepoScanOptions<Self>>(
-    options?: O,
+    options?: O & StrictOptions<O, RepoScanOptions<Self>, Self["$schema"]>,
   ): RepoScanPagedResult<Self, O> {
     for await (const page of this.db.scanPaged({ table: this.tableName, ...options })) {
       yield this.applyTransformsIfNeeded(page, options) as any;
@@ -489,7 +496,7 @@ export class Repo<
 
   async scanGsi<G extends GsiNames<Self>, const O extends RepoScanGsiOptions<Self, T, G>>(
     gsi: G,
-    options?: O,
+    options?: O & StrictOptions<O, RepoScanGsiOptions<Self, T, G>, Self["$schema"]>,
   ): Promise<RepoScanGsiResult<Self, O, G>> {
     const items = await this.db.scan({ table: this.tableName, index: gsi, ...options } as any);
     return this.applyTransformsIfNeeded(items, { ...options, gsi }) as any;
@@ -497,7 +504,7 @@ export class Repo<
 
   async *scanGsiPaged<G extends GsiNames<Self>, const O extends RepoScanGsiOptions<Self, T, G>>(
     gsi: G,
-    options?: O,
+    options?: O & StrictOptions<O, RepoScanGsiOptions<Self, T, G>, Self["$schema"]>,
   ): RepoScanGsiPagedResult<Self, O, G> {
     for await (const page of this.db.scanPaged({
       table: this.tableName,
@@ -527,7 +534,7 @@ export class Repo<
 
   async batchGet<const O extends RepoBatchGetOptions<Self>>(
     keys: RepoKey<Self>[],
-    options?: O,
+    options?: O & StrictOptions<O, RepoBatchGetOptions<Self>, Self["$schema"]>,
   ): Promise<RepoBatchGetResult<Self, O>> {
     const { filter, parallel, maxStalls, baseDelay, chunkSize, ...restOptions } = (options ??
       {}) as RepoBatchGetOptions<Self>;
@@ -550,7 +557,7 @@ export class Repo<
 
   async batchGetOrThrow<const O extends RepoBatchGetOptions<Self>>(
     keys: RepoKey<Self>[],
-    options?: O,
+    options?: O & StrictOptions<O, RepoBatchGetOptions<Self>, Self["$schema"]>,
   ): Promise<RepoBatchGetOrThrowResult<Self, O>> {
     const { filter, parallel, maxStalls, baseDelay, chunkSize, ...restOptions } = (options ??
       {}) as RepoBatchGetOptions<Self>;
@@ -661,7 +668,7 @@ export class Repo<
 
   async trxGet<const O extends RepoTrxGetOptions<Self>>(
     keys: RepoKey<Self>[],
-    options?: O,
+    options?: O & StrictOptions<O, RepoTrxGetOptions<Self>, Self["$schema"]>,
   ): Promise<RepoTrxGetResult<Self, O>> {
     const { filter, ...restOptions } = (options ?? {}) as RepoTrxGetOptions<Self>;
     const items = await this.db.trxGet(
@@ -680,7 +687,7 @@ export class Repo<
 
   async trxGetOrThrow<const O extends RepoTrxGetOptions<Self>>(
     keys: RepoKey<Self>[],
-    options?: O,
+    options?: O & StrictOptions<O, RepoTrxGetOptions<Self>, Self["$schema"]>,
   ): Promise<RepoTrxGetOrThrowResult<Self, O>> {
     const { filter, ...restOptions } = (options ?? {}) as RepoTrxGetOptions<Self>;
     const items = await this.db.trxGetOrThrow(
