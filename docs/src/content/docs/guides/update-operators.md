@@ -188,3 +188,21 @@ await repo.update(
 ```
 
 If the condition fails, DynamoDB throws a `ConditionalCheckFailedException`. Dinah implicitly adds an `$exists: true` condition for every primary key attribute, so an `update` call on a non-existent key will also fail rather than create a new item.
+
+## Read-modify-write: `patch` and `createOrPatch`
+
+`repo.patch(key, patch)` reads the item, applies `patch` (an object, or a function of the stored item), and writes only the fields that changed. Fields set to `undefined` are removed; fields left out are untouched.
+
+```typescript
+await repo.patch({ blockId }, (current) => ({ content: render(current) }));
+```
+
+The write is conditioned on every written field still holding the value that was read. On a conflict, `patch` re-reads and re-runs the function, up to `maxAttempts` times (default 5), then rethrows the conflict. Since writes never include unchanged fields, concurrent writes elsewhere on the item (such as `$plus` counters) neither conflict nor get clobbered.
+
+- If nothing changed, nothing is written and `defaultUpdateData` isn't applied.
+- A patch function must be pure: it can run more than once.
+- A missing item throws `NOT_FOUND`. Changing a key or immutable field throws `VALIDATION`.
+
+`repo.createOrPatch(item, update?)` creates `item` if its key doesn't exist, otherwise patches the existing item with `update(current)`, or with `item` itself if no function is given. Fields `item` doesn't mention, like `createdAt` from `defaultCreateData`, are left alone.
+
+**`update` or `patch`?** If you can write the change without reading first, use `update`: it's one round trip, and its operators are atomic under contention. Use `patch` when the new values depend on the stored item, or when writing a set of fields that may already match. Avoid `patch` on hot items, where contention just turns into retries.

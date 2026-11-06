@@ -176,8 +176,20 @@ export class ExpressionBuilder {
         return `${placeholder} ${comparatorOps[operator]} ${this.getPathSub(operand.$path)}`;
       }
 
-      if (!["string", "boolean", "number"].includes(typeof operand)) {
-        throw new Error(`${operator} expects a primitive/scalar operand.`);
+      // DynamoDB supports `=` / `<>` on every type, including maps, lists and
+      // NULL, so equality takes any defined value. Ordering comparators only
+      // make sense on scalars.
+      const isEquality = operator === "$eq" || operator === "$ne";
+      if (
+        isEquality
+          ? operand === undefined
+          : !["string", "boolean", "number"].includes(typeof operand)
+      ) {
+        throw new Error(
+          isEquality
+            ? `${operator} expects a defined operand. Use $exists to test for a missing attribute.`
+            : `${operator} expects a primitive/scalar operand.`,
+        );
       }
       return `${placeholder} ${comparatorOps[operator]} ${this.getValueSub(operand)}`;
     }

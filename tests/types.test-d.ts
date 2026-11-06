@@ -1788,3 +1788,46 @@ describe("unknown option names and filter fields are rejected", () => {
     await zooRepo.scan({ filter: { $or: [{ meow: "x" }, { bark: { $gt: 1 } }] } });
   });
 });
+
+describe("patch / createOrPatch", () => {
+  const computedRepo = db.makeRepo(TestTable, {
+    computedAttributes: { data: { from: "body", compute: (b: string) => b.toUpperCase() } },
+  });
+
+  test("patch accepts plain partial values or a function of the stored item", () => {
+    void repo.patch({ pk: "a", sk: "b" }, { title: "t" });
+    void repo.patch({ pk: "a", sk: "b" }, (cur) => {
+      expectTypeOf(cur).toEqualTypeOf<Item>();
+      return { title: `${cur.title}!` };
+    });
+    expectTypeOf(repo.patch({ pk: "a", sk: "b" }, {})).resolves.toEqualTypeOf<Item>();
+  });
+
+  test("patch rejects update operators, wrong types and computed fields", () => {
+    // @ts-expect-error — operators aren't diffable
+    void repo.patch({ pk: "a", sk: "b" }, { title: { $set: "t" } });
+    // @ts-expect-error — wrong type
+    void repo.patch({ pk: "a", sk: "b" }, { title: 1 });
+    // @ts-expect-error — computed fields can't be patched
+    void computedRepo.patch({ pk: "a", sk: "b" }, { data: "x" });
+  });
+
+  test("createOrPatch requires a full create item", () => {
+    void repo.createOrPatch({
+      pk: "a",
+      sk: "b",
+      gsiPk: "g",
+      gsiSk: 1,
+      title: "t",
+      body: "b",
+      data: "d",
+    });
+    // @ts-expect-error — missing required fields
+    void repo.createOrPatch({ pk: "a", sk: "b", title: "t" });
+    void repo.createOrPatch(
+      { pk: "a", sk: "b", gsiPk: "g", gsiSk: 1, title: "t", body: "b", data: "d" },
+      (cur) => ({ title: cur.title }),
+      { maxAttempts: 2 },
+    );
+  });
+});

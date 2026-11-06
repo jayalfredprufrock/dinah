@@ -73,3 +73,25 @@ describe("$literal", () => {
     });
   });
 });
+
+describe("equality conditions on non-scalar values", () => {
+  test.each([
+    ["map", { m: { $eq: { a: 1 } } }, "#0 = :0", { a: 1 }],
+    ["list", { l: { $ne: [1, 2] } }, "#0 <> :0", [1, 2]],
+    ["null", { n: { $eq: null } }, "#0 = :0", null],
+    ["shorthand null", { n: null }, "#0 = :0", null],
+    ["map with $-prefixed keys", { m: { $eq: { $x: 1 } } }, "#0 = :0", { $x: 1 }],
+  ])("%s", (_, condition, expected, value) => {
+    const eb = new ExpressionBuilder();
+    expect(eb.condition(condition)).toBe(expected);
+    expect(eb.attributeValues).toEqual({ ":0": value });
+  });
+
+  test("$eq undefined still throws", () => {
+    expect(() => new ExpressionBuilder().condition({ m: { $eq: undefined } })).toThrow();
+  });
+
+  test("ordering comparators still require scalars", () => {
+    expect(() => new ExpressionBuilder().condition({ m: { $gt: { a: 1 } } })).toThrow();
+  });
+});

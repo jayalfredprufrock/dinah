@@ -19,6 +19,9 @@ import type {
   RepoGetOptions,
   RepoGetOrThrowResult,
   RepoKey,
+  RepoPatchFn,
+  RepoPatchInput,
+  RepoPatchOptions,
   RepoPutOptions,
   RepoPutItem,
   RepoPutResult,
@@ -49,7 +52,10 @@ import type {
 import type { AllKeys, Condition, ExtractTableDef, ExtractTableSchema, Obj } from "./types";
 import { isOperation } from "./expression-builder";
 import { DinahError } from "./error";
-import { matchesPartial } from "./util";
+import { batchBackoffDelay } from "./batch";
+import { deepEqual, matchesPartial } from "./util";
+
+const DEFAULT_PATCH_MAX_ATTEMPTS = 5;
 
 // TODO: query/queryGsi needs strongly typed "key" argument
 // allows =,>,>=,<,<=,begins_with, between on sort key
@@ -361,6 +367,176 @@ export class Repo<
       throw err;
     }
     return this.applyTransformIfNeeded(result) as any;
+  }
+
+  /**
+   * Read-modify-write that only writes what changed. Reads the item
+   * (consistently), applies `patch` — an object, or a function of the current
+   * item — and diffs the result against what's stored. Changed fields are
+   * SET, fields patched to `undefined` are REMOVEd, everything else is left
+   * alone, so concurrent writes to other fields (e.g. `$add` counters) are
+   * never clobbered. The write is conditioned on every written field still
+   * holding the value that was read; on a conflict the read, patch and diff
+   * are repeated, up to `maxAttempts` times.
+   *
+   * When nothing changed, no write happens (so `defaultUpdateData` isn't
+   * applied) and the current item is returned. A patch function must be pure,
+   * since it can run more than once. Throws `NOT_FOUND` if the item doesn't
+   * exist — see {@link createOrPatch}.
+   *
+   * Prefer `update` when the change doesn't depend on the stored item: it's a
+   * single round trip and its operators are atomic under contention.
+   */
+  async patch<const K extends RepoKey<Self>>(
+    key: K,
+    patch: RepoPatchInput<Self> | RepoPatchFn<Self>,
+    options?: RepoPatchOptions,
+  ): Promise<RepoUpdateResult<Self>> {
+    return this.withPatchRetries(options, async () => {
+      const current = (await this.db.getOrThrow({
+        table: this.tableName,
+        key: this.extractKey(key),
+        resource: this.resourceName,
+        consistent: true,
+      } as any)) as Obj;
+      const input = typeof patch === "function" ? patch(current as any) : patch;
+      return this.writePatch(key as Obj, current, input as Obj);
+    });
+  }
+
+  /**
+   * Creates `item` if no item with its key exists; otherwise patches the
+   * existing item, as {@link patch} does. The patch is `update(current)` when
+   * given, else `item` itself — so fields of `item` are merged in, and fields
+   * it doesn't mention (including `defaultCreateData` keys like `createdAt`)
+   * are left alone.
+   *
+   * Reads first, so the common cases cost two requests (read + create, or
+   * read + update) and an unchanged item costs one. Only a create that loses a
+   * race to another writer pays extra: it falls back to the patch path with a
+   * fresh read.
+   */
+  async createOrPatch<const T extends RepoCreateItem<Self>>(
+    item: T,
+    update?: RepoPatchFn<Self>,
+    options?: RepoPatchOptions,
+  ): Promise<RepoUpdateResult<Self>> {
+    const key = this.extractKey(item as unknown as RepoKey<Self>) as Obj;
+    return this.withPatchRetries(options, async () => {
+      const current = (await this.db.get({
+        table: this.tableName,
+        key,
+        consistent: true,
+      } as any)) as Obj | undefined;
+      if (!current) return (await this.create(item)) as RepoUpdateResult<Self>;
+      const input = update ? update(current as any) : item;
+      return this.writePatch(key, current, input as Obj);
+    });
+  }
+
+  // Runs one read-diff-write attempt per call, retrying with jittered backoff
+  // while it loses races: a failed write condition (an update lost) or
+  // ALREADY_EXISTS (a create lost). The last error is rethrown once attempts
+  // run out.
+  private async withPatchRetries<R>(
+    options: RepoPatchOptions | undefined,
+    attempt: () => Promise<R>,
+  ): Promise<R> {
+    const requested = options?.maxAttempts ?? DEFAULT_PATCH_MAX_ATTEMPTS;
+    const maxAttempts = Number.isFinite(requested) ? Math.max(1, Math.trunc(requested)) : 1;
+    for (let n = 1; ; n++) {
+      try {
+        return await attempt();
+      } catch (err) {
+        const lostRace =
+          err instanceof DinahError &&
+          (err.details.type === "CONDITIONAL_CHECK_FAILED" ||
+            err.details.type === "ALREADY_EXISTS");
+        if (!lostRace || n >= maxAttempts) throw err;
+        await new Promise((resolve) => setTimeout(resolve, batchBackoffDelay(n)));
+      }
+    }
+  }
+
+  private async writePatch(key: Obj, current: Obj, input: Obj): Promise<RepoUpdateResult<Self>> {
+    const { transformAttributes, computedAttributes } = this.config;
+    const { partitionKey, sortKey } = this.table.def;
+    const keyFields = new Set<string>([partitionKey, sortKey].filter(Boolean) as string[]);
+
+    // Values as they'd be stored, so they compare against `current` (which is
+    // post-transform). The untransformed value is what's sent on, since the
+    // update path applies transforms itself.
+    const stored = (k: string, v: unknown): unknown => {
+      const transform = (transformAttributes as Obj | undefined)?.[k];
+      return v !== undefined && transform ? transform(v) : v;
+    };
+
+    const update: Obj = {};
+    const written = new Set<string>();
+
+    for (const [k, v] of Object.entries(input)) {
+      if (computedAttributes && k in computedAttributes) {
+        throw new DinahError({
+          type: "VALIDATION",
+          message: `Field "${k}" is a computed attribute and cannot be set directly. Patch the source field instead.`,
+        });
+      }
+      if (keyFields.has(k)) {
+        if (v !== undefined && !deepEqual(stored(k, v), current[k])) {
+          throw new DinahError({
+            type: "VALIDATION",
+            message: `Field "${k}" is part of the primary key and cannot be patched to a different value.`,
+          });
+        }
+        continue;
+      }
+      if (v === undefined) {
+        if (current[k] === undefined) continue;
+        update[k] = { $remove: true };
+      } else if (deepEqual(stored(k, v), current[k])) {
+        continue;
+      } else {
+        update[k] = v;
+      }
+      written.add(k);
+    }
+
+    if (!written.size) return this.applyTransformIfNeeded(current as any);
+
+    // A multi-source computed field is only recomputed when the update carries
+    // all of its sources. Fill unchanged ones in from the read, marked so the
+    // update path doesn't transform the already-stored value a second time.
+    // They're conditioned on below too, since the recomputed value depends on
+    // them.
+    const preTransformed = new Set<string>();
+    for (const def of Object.values(computedAttributes ?? {})) {
+      const from = (def as { from: string | readonly string[] }).from;
+      if (!Array.isArray(from) || !from.some((k: string) => written.has(k))) continue;
+      for (const k of from as string[]) {
+        if (written.has(k)) continue;
+        update[k] = current[k] === undefined ? { $remove: true } : current[k];
+        preTransformed.add(k);
+        written.add(k);
+      }
+    }
+
+    const condition = {
+      $and: [
+        { [partitionKey]: { $exists: true } },
+        ...[...written].map((k) =>
+          current[k] === undefined ? { [k]: { $exists: false } } : { [k]: { $eq: current[k] } },
+        ),
+      ],
+    } as unknown as Condition<ExtractTableSchema<T>>;
+
+    const result = await this.db.update({
+      table: this.tableName,
+      key: this.extractKey(key as RepoKey<Self>),
+      resource: this.resourceName,
+      update: this.applyNormalizersToExpression(update, preTransformed) as any,
+      condition: this.withDiscriminatorCondition(key, condition),
+    });
+    return this.applyTransformIfNeeded(result);
   }
 
   async delete(
@@ -867,7 +1043,9 @@ export class Repo<
     return merged as Partial<ExtractTableSchema<T>>;
   }
 
-  private applyNormalizersToExpression(userUpdate: Obj): Obj {
+  // `preTransformed` names fields whose values are already in stored form
+  // (taken from a read), so `transformAttributes` must not run on them again.
+  private applyNormalizersToExpression(userUpdate: Obj, preTransformed?: Set<string>): Obj {
     const { transformAttributes, computedAttributes, immutableAttributes } = this.config;
 
     if (computedAttributes) {
@@ -894,7 +1072,7 @@ export class Repo<
 
     if (transformAttributes) {
       for (const [key, transform] of Object.entries(transformAttributes)) {
-        if (!(key in result)) continue;
+        if (!(key in result) || preTransformed?.has(key)) continue;
         const val = result[key];
         const fn = transform as (v: unknown) => unknown;
         if (val === undefined || (isOperation(val) && val.$remove === true)) {

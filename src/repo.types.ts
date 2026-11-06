@@ -180,6 +180,29 @@ export interface RepoUpdateOptions<R extends RepoBase> {
 
 export type RepoUpdateResult<R extends RepoBase> = SimplifyItem<R, RepoOutput<R>>;
 
+// patch ----------------------------------------------------------------------------------------------
+
+/**
+ * Plain field values to apply with `patch` / `createOrPatch`. Fields left out
+ * are untouched; a field set to `undefined` is removed. Update operators
+ * (`$add`, `$append`, …) aren't accepted — a patch is diffed against the
+ * stored item, which only makes sense for literal values.
+ */
+export type RepoPatchInput<R extends RepoBase> = Partial<
+  DistOmit<R["$schema"], R["$computedAttributes"]>
+>;
+
+export type RepoPatchFn<R extends RepoBase> = (current: R["$schema"]) => RepoPatchInput<R>;
+
+export interface RepoPatchOptions {
+  /**
+   * Read-diff-write attempts before giving up and rethrowing the last
+   * conflict. Each retry re-reads the item and re-runs the patch function.
+   * Defaults to 5.
+   */
+  maxAttempts?: number;
+}
+
 // delete ---------------------------------------------------------------------------------------------
 
 export interface RepoDeleteOptions<R extends RepoBase> {

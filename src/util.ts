@@ -137,3 +137,44 @@ export const removeUndefined = (obj: Obj) => {
   }
   return obj;
 };
+
+/**
+ * Structural equality matching DynamoDB's `=` semantics for the values the
+ * document client produces: map key order is irrelevant, list order matters,
+ * sets compare unordered, binary compares bytewise. An absent key and an
+ * `undefined` value are treated as equal, since neither is stored.
+ */
+export const deepEqual = (a: unknown, b: unknown): boolean => {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+
+  if (a instanceof Set || b instanceof Set) {
+    if (!(a instanceof Set && b instanceof Set) || a.size !== b.size) return false;
+    for (const v of a) {
+      if (!b.has(v) && ![...b].some((w) => deepEqual(v, w))) return false;
+    }
+    return true;
+  }
+
+  if (ArrayBuffer.isView(a) || ArrayBuffer.isView(b)) {
+    if (!(ArrayBuffer.isView(a) && ArrayBuffer.isView(b)) || a.byteLength !== b.byteLength) {
+      return false;
+    }
+    const x = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
+    const y = new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
+    return x.every((byte, i) => byte === y[i]);
+  }
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!(Array.isArray(a) && Array.isArray(b)) || a.length !== b.length) return false;
+    return a.every((v, i) => deepEqual(v, b[i]));
+  }
+
+  const ao = a as Obj;
+  const bo = b as Obj;
+  const keys = new Set([...Object.keys(ao), ...Object.keys(bo)]);
+  for (const k of keys) {
+    if (!deepEqual(ao[k], bo[k])) return false;
+  }
+  return true;
+};
