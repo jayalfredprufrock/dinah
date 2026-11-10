@@ -25,6 +25,15 @@ afterAll(async () => {
   await db.deleteTable(PetTable.def.name).catch(() => {});
 });
 
+describe("DiscriminatedUnion", () => {
+  test("flattens variant groups into one flat anyOf", () => {
+    const Fish = Type.Object({ id: Type.String(), kind: Type.Literal("fish") });
+    const Pet = DiscriminatedUnion("kind", [Type.Union([Cat, Dog]), Fish]);
+    expect(Pet.anyOf).toEqual([Cat, Dog, Fish]);
+    expect(Pet.discriminator).toEqual({ propertyName: "kind" });
+  });
+});
+
 describe("discriminatorOf", () => {
   test("reads the annotation, ignores plain unions and objects", () => {
     expect(discriminatorOf(PetTable.schema)).toBe("kind");

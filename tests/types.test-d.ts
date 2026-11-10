@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { describe, expectTypeOf, test } from "vite-plus/test";
 import { makeRepo, Db, DiscriminatedUnion, Repo, Table } from "../src";
 import type { Condition, Simplify, SortKeyOps } from "../src/types";
@@ -1315,6 +1315,41 @@ const animalRepo = db.makeRepo(AnimalTable);
 const PlainAnimalTable = new Table(Type.Union(AnimalSchema.anyOf), {
   name: "plain_animals",
   partitionKey: "id",
+});
+
+describe("DiscriminatedUnion", () => {
+  const Cat = Type.Object({ id: Type.String(), kind: Type.Literal("cat"), meow: Type.String() });
+  const Dog = Type.Object({ id: Type.String(), kind: Type.Literal("dog"), bark: Type.Number() });
+  const Fish = Type.Object({ id: Type.String(), kind: Type.Literal("fish") });
+
+  test("the discriminator must be a literal in every variant", () => {
+    const StringTag = Type.Object({ id: Type.String(), kind: Type.String() });
+    const NoTag = Type.Object({ id: Type.String() });
+    void DiscriminatedUnion("kind", [Cat, Dog]);
+    // @ts-expect-error typo
+    void DiscriminatedUnion("knd", [Cat, Dog]);
+    // @ts-expect-error "meow" only exists on the cat variant
+    void DiscriminatedUnion("meow", [Cat, Dog]);
+    // @ts-expect-error "id" is shared but not a literal
+    void DiscriminatedUnion("id", [Cat, Dog]);
+    // @ts-expect-error one variant lacks the tag
+    void DiscriminatedUnion("kind", [Cat, NoTag]);
+    // @ts-expect-error tag isn't a literal in one variant
+    void DiscriminatedUnion("kind", [Cat, StringTag]);
+    // @ts-expect-error tag isn't a literal in a nested variant
+    void DiscriminatedUnion("kind", [Type.Union([Cat, StringTag]), Fish]);
+  });
+
+  test("nested variant groups narrow like a flat union", async () => {
+    const Pets = DiscriminatedUnion("kind", [Type.Union([Cat, Dog]), Fish]);
+    expectTypeOf<Static<typeof Pets>>().toEqualTypeOf<
+      Static<typeof Cat> | Static<typeof Dog> | Static<typeof Fish>
+    >();
+    const pets = db.makeRepo(new Table(Pets, { name: "pets", partitionKey: "id" }));
+    await pets.update({ id: "p", kind: "dog" }, { bark: 1 });
+    // @ts-expect-error "meow" is not on the dog variant
+    await pets.update({ id: "p", kind: "dog" }, { meow: "x" });
+  });
 });
 
 describe("discriminator-narrowed update", () => {

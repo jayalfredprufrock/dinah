@@ -60,7 +60,8 @@ import type {
 import { isOperation } from "./expression-builder";
 import { DinahError } from "./error";
 import { batchBackoffDelay } from "./batch";
-import { deepEqual, discriminatorOf, matchesPartial } from "./util";
+import { discriminatorOf } from "./discriminated-union";
+import { deepEqual, matchesPartial } from "./util";
 
 const DEFAULT_PATCH_MAX_ATTEMPTS = 5;
 

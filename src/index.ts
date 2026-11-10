@@ -1,6 +1,7 @@
 export * from "./batch";
 export * from "./db";
 export * from "./db.types";
+export * from "./discriminated-union";
 export * from "./error";
 export * from "./repo";
 export * from "./repo.types";
