@@ -60,7 +60,7 @@ import type {
 import { isOperation } from "./expression-builder";
 import { DinahError } from "./error";
 import { batchBackoffDelay } from "./batch";
-import { discriminatorOf } from "./discriminated-union";
+import { IsDiscriminatedUnion } from "./discriminated-union";
 import { deepEqual, matchesPartial } from "./util";
 
 const DEFAULT_PATCH_MAX_ATTEMPTS = 5;
@@ -1164,8 +1164,9 @@ export class Repo<
     key: Obj,
     condition: Condition<ExtractTableSchema<T>> | undefined,
   ): Condition<ExtractTableSchema<T>> | undefined {
-    const discriminator = discriminatorOf(this.table.schema);
-    if (!discriminator) return condition;
+    const schema = this.table.schema;
+    if (!IsDiscriminatedUnion(schema)) return condition;
+    const discriminator = schema.discriminator.propertyName;
     const value = key[discriminator];
     if (value === undefined) return condition;
     const guard = { [discriminator]: value } as Condition<ExtractTableSchema<T>>;

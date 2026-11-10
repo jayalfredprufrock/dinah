@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { Type } from "typebox";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { DiscriminatedUnion, discriminatorOf, Table } from "../src";
+import { DiscriminatedUnion, IsDiscriminatedUnion, Table } from "../src";
 import { createDb } from "./setup";
 
 const Cat = Type.Object({ id: Type.String(), kind: Type.Literal("cat"), meow: Type.String() });
@@ -34,11 +34,11 @@ describe("DiscriminatedUnion", () => {
   });
 });
 
-describe("discriminatorOf", () => {
+describe("IsDiscriminatedUnion", () => {
   test("reads the annotation, ignores plain unions and objects", () => {
-    expect(discriminatorOf(PetTable.schema)).toBe("kind");
-    expect(discriminatorOf(Type.Union([Cat, Dog]))).toBeUndefined();
-    expect(discriminatorOf(Cat)).toBeUndefined();
+    expect(IsDiscriminatedUnion(PetTable.schema)).toBe(true);
+    expect(IsDiscriminatedUnion(Type.Union([Cat, Dog]))).toBe(false);
+    expect(IsDiscriminatedUnion(Cat)).toBe(false);
   });
 });
 
