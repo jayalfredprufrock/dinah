@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { describe, expectTypeOf, test } from "vite-plus/test";
-import { makeRepo, Db, Repo, Table } from "../src";
+import { makeRepo, Db, DiscriminatedUnion, Repo, Table } from "../src";
 import type { Condition, Simplify, SortKeyOps } from "../src/types";
 import type {
   RepoGetOptions,
@@ -1293,7 +1293,7 @@ describe("update expression typing — invalid expressions", () => {
 
 // ── Discriminator-narrowed update ─────────────────────────────────────────────
 
-const AnimalSchema = Type.Union([
+const AnimalSchema = DiscriminatedUnion("kind", [
   Type.Object({
     id: Type.String(),
     kind: Type.Literal("cat"),
@@ -1311,7 +1311,11 @@ const AnimalTable = new Table(AnimalSchema, {
   name: "animals",
   partitionKey: "id",
 });
-const animalRepo = db.makeRepo(AnimalTable, { discriminator: "kind" });
+const animalRepo = db.makeRepo(AnimalTable);
+const PlainAnimalTable = new Table(Type.Union(AnimalSchema.anyOf), {
+  name: "plain_animals",
+  partitionKey: "id",
+});
 
 describe("discriminator-narrowed update", () => {
   test("update with discriminator literal allows variant-specific fields", async () => {
@@ -1341,12 +1345,12 @@ describe("discriminator-narrowed update", () => {
     await animalRepo.update({ id: "a1" }, { bark: 1 });
   });
 
-  test("repo without configured discriminator is unaffected", async () => {
-    const plainRepo = db.makeRepo(AnimalTable);
-    // Even with kind on the key, no narrowing happens because no discriminator
-    // was configured — fallback is shared keys only.
+  test("repo over an unannotated union is unaffected", async () => {
+    const plainRepo = db.makeRepo(PlainAnimalTable);
+    // Even with kind on the key, no narrowing happens because the schema has no
+    // discriminator annotation — fallback is shared keys only.
     await plainRepo.update({ id: "a1", kind: "cat" }, { name: "Whiskers" });
-    // @ts-expect-error — "meow" is variant-specific and no discriminator config
+    // @ts-expect-error — "meow" is variant-specific and no discriminator annotation
     await plainRepo.update({ id: "a1", kind: "cat" }, { meow: "loud" });
   });
 
@@ -1370,12 +1374,11 @@ describe("discriminator-narrowed update", () => {
 describe("immutableAttributes accepts variant-specific keys", () => {
   test("variant-specific immutable attribute is allowed", () => {
     // The constraint is AllKeys<TSchema>, so "meow" (cat-only) is accepted.
-    void db.makeRepo(AnimalTable, { discriminator: "kind", immutableAttributes: ["meow"] });
+    void db.makeRepo(AnimalTable, { immutableAttributes: ["meow"] });
   });
 
   test("immutable variant-specific attribute is stripped from narrowed update", async () => {
     const immRepo = db.makeRepo(AnimalTable, {
-      discriminator: "kind",
       immutableAttributes: ["meow"],
     });
     // When narrowed to cat via discriminator, meow is immutable → rejected.
@@ -1387,7 +1390,6 @@ describe("immutableAttributes accepts variant-specific keys", () => {
 
   test("rejects keys that don't exist on any variant", () => {
     void db.makeRepo(AnimalTable, {
-      discriminator: "kind",
       // @ts-expect-error — "nope" is not a key on any variant
       immutableAttributes: ["nope"],
     });
@@ -1396,7 +1398,7 @@ describe("immutableAttributes accepts variant-specific keys", () => {
 
 // ── GSI queries preserve discriminated union variants ─────────────────────────
 
-const ZooSchema = Type.Union([
+const ZooSchema = DiscriminatedUnion("kind", [
   Type.Object({
     id: Type.String(),
     kind: Type.Literal("cat"),
@@ -1424,7 +1426,7 @@ type ZooDog = { id: string; kind: "dog"; name: string; bark: number };
 // equals V, but expectTypeOf's strict equality cares about the form.
 type ZooCatGsi = Omit<ZooCat, "kind"> & Required<Pick<ZooCat, "kind">>;
 type ZooDogGsi = Omit<ZooDog, "kind"> & Required<Pick<ZooDog, "kind">>;
-const zooRepo = db.makeRepo(ZooTable, { discriminator: "kind" });
+const zooRepo = db.makeRepo(ZooTable);
 
 describe("GSI queries preserve union variants", () => {
   test("queryGsi returns the full union, not a collapsed shape", async () => {

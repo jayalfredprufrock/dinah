@@ -296,8 +296,7 @@ Applies an update expression to many keys via PartiQL `BatchExecuteStatement`. D
 ```typescript
 {
   parallel?: number;   // requests in flight, default 1
-  maxStalls?: number;  // consecutive zero-progress passes before giving up, default 10
-  baseDelay?: number;  // backoff base in ms, default 50
+  maxAttempts?: number;  // consecutive zero-progress passes before giving up, default 10
   chunkSize?: number;  // items per request; defaults to and is clamped to
                        // DynamoDB's max (25 write/update, 100 get)
 }

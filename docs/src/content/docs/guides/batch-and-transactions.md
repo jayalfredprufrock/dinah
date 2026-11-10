@@ -125,7 +125,7 @@ When DynamoDB throttles a batch _as a whole_, the AWS SDK already retries it wit
 
 Work is drained in _passes_. Within a pass each chunk is sent exactly once, up to `parallel` requests in flight; anything the service hands back is held until the pass ends, so a retry always costs a backoff delay rather than an immediate re-send.
 
-Termination is based on **progress, not attempts**. A pass that accepts even one item resets the stall counter, so a large job under steady mild throttling runs to completion rather than being abandoned. Only passes that accept _nothing_ count against `maxStalls`.
+Termination is based on **progress, not attempts**. A pass that accepts even one item resets the stall counter, so a large job under steady mild throttling runs to completion rather than being abandoned. Only passes that accept _nothing_ count against `maxAttempts`.
 
 Chunk size stays constant. Shrinking batches doesn't reduce the capacity consumed — the same items still land on the same partitions — so backoff, not a smaller batch, is the control for throttling.
 
@@ -151,8 +151,7 @@ All three batch methods accept the same options:
 ```typescript
 await userRepo.batchWrite(requests, {
   parallel: 5, // requests in flight (default 1)
-  maxStalls: 10, // consecutive zero-progress passes before giving up (default 10)
-  baseDelay: 50, // backoff base in ms (default 50)
+  maxAttempts: 10, // consecutive zero-progress passes before giving up (default 10)
   chunkSize: 25, // items per request (default & max 25 here, 100 for batchGet)
 });
 ```
@@ -177,7 +176,7 @@ Then:
 
 ### Deadlines
 
-With the defaults, a batch whose table accepts _nothing_ retries for up to ~45s (typically ~23s) before returning `unprocessed`. That suits a CLI job, but it outlasts a short Lambda timeout — and a function killed mid-retry loses the `unprocessed` result entirely, which is worse than being told about it. Lower `maxStalls` when your caller has a tighter deadline.
+With the defaults, a batch whose table accepts _nothing_ retries for up to ~45s (typically ~23s) before returning `unprocessed`. That suits a CLI job, but it outlasts a short Lambda timeout — and a function killed mid-retry loses the `unprocessed` result entirely, which is worse than being told about it. Lower `maxAttempts` when your caller has a tighter deadline.
 
 ## Transactions
 

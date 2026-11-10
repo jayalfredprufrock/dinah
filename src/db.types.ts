@@ -114,13 +114,11 @@ export interface DbBatchOptions {
   parallel?: number;
   /**
    * Consecutive passes that accept *zero* items before giving up and returning
-   * the remainder as `unprocessed`. Defaults to 10, which with the default
-   * backoff is roughly 45s of retrying. Passes that make any progress don't
-   * count against this.
+   * the remainder as `unprocessed`. Defaults to 10, roughly 45s of retrying.
+   * Passes that make any progress don't count against this, so it is not a cap
+   * on total requests.
    */
-  maxStalls?: number;
-  /** Base backoff delay in ms between passes that were partially throttled. Defaults to 50. */
-  baseDelay?: number;
+  maxAttempts?: number;
   /**
    * Items per request. Defaults to — and is clamped to — DynamoDB's maximum: 25
    * for `batchWrite` / `batchUpdate`, 100 for `batchGet`.

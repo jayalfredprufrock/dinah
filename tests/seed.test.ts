@@ -112,8 +112,8 @@ describe("createSeed", () => {
     await users.put(db);
     expect(batchWriteOrThrow.mock.calls[0]?.[1]).toEqual({ parallel: 5 });
 
-    await users.put(db, { parallel: 1, maxStalls: 3 });
-    expect(batchWriteOrThrow.mock.calls[1]?.[1]).toEqual({ parallel: 1, maxStalls: 3 });
+    await users.put(db, { parallel: 1, maxAttempts: 3 });
+    expect(batchWriteOrThrow.mock.calls[1]?.[1]).toEqual({ parallel: 1, maxAttempts: 3 });
   });
 
   test(".put throws rather than silently seeding only part of the data", async () => {

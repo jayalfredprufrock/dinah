@@ -1,10 +1,10 @@
 // Type-checking cost fixture (see ../type-perf.test.ts). Covers the patterns that
 // previously cost ~1M type instantiations each, plus typical repo usage.
 import { Type } from "typebox";
-import { Db, Table } from "../../src";
+import { Db, DiscriminatedUnion, Table } from "../../src";
 import { createSeed, isSeed, Seed } from "../../src/seed";
 
-const Animal = Type.Union([
+const Animal = DiscriminatedUnion("kind", [
   Type.Object({
     id: Type.String(),
     kind: Type.Literal("cat"),
@@ -40,7 +40,6 @@ declare const db: Db;
 
 // repos with context-sensitive config callbacks
 const animals = db.makeRepo(AnimalTable, {
-  discriminator: "kind",
   transformOutput: (item) => ({ ...item, label: item.name }),
 });
 const accounts = db.makeRepo(AccountTable, {

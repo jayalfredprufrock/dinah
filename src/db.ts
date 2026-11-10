@@ -141,7 +141,6 @@ export class Db {
     TOutput = ExtractTableSchema<T>,
     const TComputed extends ValidComputedMap<ExtractTableSchema<T>, TComputed> = {},
     const TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
-    const TDiscriminator extends keyof ExtractTableSchema<T> = never,
   >(
     table: T,
     config?: RepoConfig<
@@ -150,10 +149,9 @@ export class Db {
       TUpdateDefaults,
       TOutput,
       TComputed,
-      TImmutable,
-      TDiscriminator
+      TImmutable
     >,
-  ): Repo<T, TDefaults, TUpdateDefaults, TOutput, TComputed, TImmutable, TDiscriminator> {
+  ): Repo<T, TDefaults, TUpdateDefaults, TOutput, TComputed, TImmutable> {
     return new Repo(this, table, config);
   }
 

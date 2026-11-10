@@ -4,7 +4,7 @@ import type {
   ProjectionType,
 } from "@aws-sdk/client-dynamodb";
 import * as T from "typebox";
-import type { Obj } from "./types";
+import type { DiscriminatedUnionSchema, Obj } from "./types";
 import type { Table } from "./table";
 
 const collectAttrTypes = (schema: T.TSchema | T.TEnumValue, attrName: string): ("S" | "N")[] => {
@@ -39,6 +39,31 @@ const collectAttrTypes = (schema: T.TSchema | T.TEnumValue, attrName: string): (
   }
 
   return [];
+};
+
+/**
+ * `T.Union(variants)` annotated with its discriminator. `T.Union`'s options don't reach its
+ * return type, so this keeps the literal name in the type for repos to narrow on.
+ */
+export const DiscriminatedUnion = <
+  const V extends T.TSchema[],
+  D extends keyof T.Static<T.TUnion<V>> & string,
+>(
+  propertyName: D,
+  variants: [...V],
+  options?: T.TSchemaOptions,
+): DiscriminatedUnionSchema<D, V> =>
+  T.Union(variants, { ...options, discriminator: { propertyName } }) as DiscriminatedUnionSchema<
+    D,
+    V
+  >;
+
+/** The discriminator a schema is annotated with, or `undefined`. */
+export const discriminatorOf = (schema: unknown): string | undefined => {
+  if (!T.IsUnion(schema)) return undefined;
+  const name = (schema as { discriminator?: { propertyName?: unknown } }).discriminator
+    ?.propertyName;
+  return typeof name === "string" ? name : undefined;
 };
 
 export const resolveAttrType = (schema: T.TSchema | T.TEnumValue, attrName: string): "S" | "N" => {

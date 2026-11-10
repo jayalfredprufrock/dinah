@@ -24,13 +24,14 @@
 export const DEFAULT_BATCH_PARALLEL = 1;
 
 /**
- * Consecutive passes that accept *zero* items before giving up. Combined with
+ * Consecutive passes that accept *zero* items before giving up — passes that make
+ * any progress don't count, so this is not a cap on total requests. Combined with
  * the backoff below this is up to ~45s of retrying before a table is declared
  * unable to accept the write. Lower it when the caller has a shorter deadline
  * than that — a Lambda killed mid-retry loses the `unprocessed` result
  * entirely, which is worse than being told about it.
  */
-export const DEFAULT_BATCH_MAX_STALLS = 10;
+export const DEFAULT_BATCH_MAX_ATTEMPTS = 10;
 
 /**
  * Base backoff delay. Lower than the SDK's 500ms throttling base because a
@@ -62,10 +63,11 @@ export interface BatchRunOptions {
   chunkSize?: number;
   /** Max requests in flight. Defaults to {@link DEFAULT_BATCH_PARALLEL}. */
   parallel?: number;
-  /** Consecutive zero-progress passes tolerated before returning leftovers. */
-  maxStalls?: number;
-  /** Base backoff delay in ms. */
-  baseDelay?: number;
+  /**
+   * Consecutive zero-progress passes tolerated before returning leftovers. Passes that
+   * accept anything reset the count.
+   */
+  maxAttempts?: number;
 }
 
 /**
@@ -108,8 +110,7 @@ export async function runBatched<T>(
     limit,
     chunkSize,
     parallel = DEFAULT_BATCH_PARALLEL,
-    maxStalls = DEFAULT_BATCH_MAX_STALLS,
-    baseDelay = DEFAULT_BATCH_BASE_DELAY,
+    maxAttempts = DEFAULT_BATCH_MAX_ATTEMPTS,
   }: BatchRunOptions,
 ): Promise<T[]> {
   // Clamped rather than validated: a chunk above the API maximum is rejected
@@ -124,7 +125,7 @@ export async function runBatched<T>(
   let pending = items;
   let stalls = 0;
 
-  while (pending.length && stalls < maxStalls) {
+  while (pending.length && stalls < maxAttempts) {
     const current = pending;
     const retry: T[] = [];
     let cursor = 0;
@@ -159,9 +160,9 @@ export async function runBatched<T>(
     stalls = unprocessed < current.length ? 0 : stalls + 1;
     pending = retry;
 
-    if (stalls >= maxStalls) break;
+    if (stalls >= maxAttempts) break;
 
-    await sleep(batchBackoffDelay(stalls, baseDelay));
+    await sleep(batchBackoffDelay(stalls));
   }
 
   return pending;

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { Db, batchBackoffDelay, runBatched } from "../src";
 
 // DynamoDB Local never returns `UnprocessedItems`, so the partial-throttle path
@@ -46,10 +46,16 @@ const written = (calls: Call[]) => {
   return ids;
 };
 
-// Backoff sleeps for real, so tests that deliberately stall pass a tiny
-// `baseDelay`. Fake timers can't be used here: the loop awaits a real
+// Backoff sleeps for real, so `Math.random` is pinned to 0, making every
+// jittered delay 0. Fake timers can't be used here: the loop awaits a real
 // `setTimeout` between passes, so a mocked clock that nothing advances
 // deadlocks it.
+beforeEach(() => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("batch retry loop", () => {
   test("mild partial throttling does not abandon the rest of the job", async () => {
@@ -90,7 +96,7 @@ describe("batch retry loop", () => {
   test("gives up only after consecutive zero-progress passes, and reports leftovers", async () => {
     const { db, calls } = fakeDb((_call, chunk) => chunk);
 
-    const result = await db.batchWrite({ t: puts(100) }, { baseDelay: 1 });
+    const result = await db.batchWrite({ t: puts(100) });
 
     // 4 chunks per pass * 10 stall passes; nothing is lost, it's all returned.
     expect(calls.length).toBe(40);
@@ -99,9 +105,10 @@ describe("batch retry loop", () => {
 
   test("retries are paced by backoff rather than spun", async () => {
     const { db } = fakeDb((_call, chunk) => chunk);
+    vi.mocked(Math.random).mockReturnValue(0.5);
 
     const start = Date.now();
-    await db.batchWrite({ t: puts(25) }, { maxStalls: 4, baseDelay: 200 });
+    await db.batchWrite({ t: puts(25) }, { maxAttempts: 4 });
     const elapsed = Date.now() - start;
 
     // Full jitter means the delay is a random point in [0, base * 2^n), so this
@@ -151,7 +158,7 @@ describe("batchWriteOrThrow", () => {
   test("throws with a per-table count when items are left unprocessed", async () => {
     const { db } = fakeDb((_call, chunk) => chunk);
 
-    await expect(db.batchWriteOrThrow({ t: puts(25) }, { baseDelay: 1 })).rejects.toMatchObject({
+    await expect(db.batchWriteOrThrow({ t: puts(25) })).rejects.toMatchObject({
       name: "DinahError",
       details: { type: "BATCH_UNPROCESSED", unprocessed: { t: 25 } },
     });
@@ -218,9 +225,9 @@ describe("batchUpdate error classification", () => {
       Array.from({ length: count }, () => ({ Error: { Code: "ConditionalCheckFailed" } })),
     );
 
-    await expect(
-      db.batchUpdate({ t: { keys: keys(2), update: { name: "x" } } }, { baseDelay: 1 }),
-    ).rejects.toThrow(/permanent error \(ConditionalCheckFailed\)/);
+    await expect(db.batchUpdate({ t: { keys: keys(2), update: { name: "x" } } })).rejects.toThrow(
+      /permanent error \(ConditionalCheckFailed\)/,
+    );
   });
 });
 
@@ -234,7 +241,7 @@ describe("runBatched", () => {
         sends++;
         return chunk.slice(1);
       },
-      { limit: 5, parallel: 1, baseDelay: 0 },
+      { limit: 5, parallel: 1 },
     );
 
     expect(leftover).toEqual([]);

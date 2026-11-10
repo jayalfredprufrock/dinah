@@ -1,4 +1,4 @@
-import type { Static } from "typebox";
+import type { Static, TSchema, TUnion } from "typebox";
 import type { Table } from "./table";
 
 export type Obj<T = any> = Record<string, T>;
@@ -46,6 +46,24 @@ export type ExtractTableSchema<T> =
     ? unknown extends Static<Schema>
       ? any
       : Static<Schema>
+    : never;
+
+/**
+ * A union annotated with the property that tells its variants apart, in OpenAPI's
+ * `discriminator.propertyName` shape. Structural, so a schema from any builder with this shape
+ * (handshake's or mobx-toolbox's `DiscriminatedUnion`) is accepted as-is.
+ */
+export type DiscriminatedUnionSchema<
+  D extends string = string,
+  V extends TSchema[] = TSchema[],
+> = TUnion<V> & { discriminator: { propertyName: D } };
+
+/** The discriminator a table's schema is annotated with, or `never`. */
+export type ExtractTableDiscriminator<T> =
+  T extends Table<infer Schema, any>
+    ? Schema extends { discriminator: { propertyName: infer D extends string } }
+      ? D
+      : never
     : never;
 
 export type ExtractKey<S, D> = D extends { partitionKey: infer PK; sortKey?: infer SK }

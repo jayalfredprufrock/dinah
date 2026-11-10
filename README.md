@@ -365,13 +365,20 @@ class UserRepo extends makeRepo(UserTable, {
 
 Both `computedAttributes` keys and `immutableAttributes` are inferred as literal types — no `as const` needed.
 
-### discriminator / resourceName
+### Discriminated unions
 
-`discriminator` names a schema field that tags a discriminated-union item type; Dinah uses it to narrow update inputs and results to the matching variant and to guard writes. `resourceName` sets the label used in thrown `DinahError`s (defaults to the class name without the `Repo` suffix, else the table name).
+A union schema annotated with `discriminator: { propertyName }` (OpenAPI's shape) tells Dinah which field tags its variants. Dinah uses it to narrow update inputs and results to the matching variant and to guard writes. Build one with `DiscriminatedUnion` (any structurally matching schema, e.g. from handshake, works too):
+
+```typescript
+const EventSchema = DiscriminatedUnion("kind", [ClickEvent, ViewEvent]);
+```
+
+### resourceName
+
+`resourceName` sets the label used in thrown `DinahError`s (defaults to the class name without the `Repo` suffix, else the table name).
 
 ```typescript
 class EventRepo extends makeRepo(EventTable, {
-  discriminator: "kind",
   resourceName: "Event",
 }) {}
 ```

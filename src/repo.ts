@@ -49,11 +49,18 @@ import type {
   RepoQueryQuery,
   StrictOptions,
 } from "./repo.types";
-import type { AllKeys, Condition, ExtractTableDef, ExtractTableSchema, Obj } from "./types";
+import type {
+  AllKeys,
+  Condition,
+  ExtractTableDef,
+  ExtractTableDiscriminator,
+  ExtractTableSchema,
+  Obj,
+} from "./types";
 import { isOperation } from "./expression-builder";
 import { DinahError } from "./error";
 import { batchBackoffDelay } from "./batch";
-import { deepEqual, matchesPartial } from "./util";
+import { deepEqual, discriminatorOf, matchesPartial } from "./util";
 
 const DEFAULT_PATCH_MAX_ATTEMPTS = 5;
 
@@ -112,10 +119,8 @@ export interface RepoConfig<
   TOutput = TSchema,
   TComputed extends ValidComputedMap<TSchema, TComputed> = {},
   TImmutable extends AllKeys<TSchema> = never,
-  TDiscriminator extends keyof TSchema = never,
 > {
   resourceName?: string;
-  discriminator?: TDiscriminator;
   defaultCreateData?: () => TDefaults;
   defaultUpdateData?: () => TUpdateDefaults;
   transformAttributes?: { [K in keyof TSchema]?: (val: TSchema[K]) => TSchema[K] };
@@ -137,7 +142,7 @@ export interface RepoConfig<
 // and TypeScript defers indexed access on a type parameter, so `this`-based
 // helpers never reduce inside a (sub)class method body — even though they do
 // reduce at an external call site where `this` binds to the concrete receiver.
-// The ordinary class params (T, TDiscriminator, ...) ARE bound to concrete
+// The ordinary class params (T, TImmutable, ...) ARE bound to concrete
 // types through a subclass's heritage clause, so a `Self` rebuilt from them
 // reduces everywhere, including inside subclass methods like
 // `class LogRepo extends makeRepo(t) { m() { this.queryGsi(...) } }`.
@@ -148,13 +153,12 @@ type RepoSelf<
   TOutput,
   TComputed,
   TImmutable extends PropertyKey,
-  TDiscriminator extends PropertyKey,
 > = {
   readonly $schema: ExtractTableSchema<T>;
   readonly $def: ExtractTableDef<T>;
   readonly $computedAttributes: keyof TComputed;
   readonly $immutableAttributes: TImmutable;
-  readonly $discriminator: TDiscriminator;
+  readonly $discriminator: ExtractTableDiscriminator<T>;
   readonly table: T;
   readonly defaultCreateData: TDefaults;
   readonly defaultUpdateData: TUpdateDefaults;
@@ -171,20 +175,11 @@ export class Repo<
   TOutput = ExtractTableSchema<T>,
   TComputed extends ValidComputedMap<ExtractTableSchema<T>, TComputed> = {},
   TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
-  TDiscriminator extends keyof ExtractTableSchema<T> = never,
   // Synthetic, never passed explicitly. Bound to its default at every use site;
   // because the default is built from the params above (concrete in a subclass
   // heritage clause), method signatures written against `Self` reduce inside
   // subclass method bodies where `this`-based ones do not. See RepoSelf above.
-  Self extends RepoBase = RepoSelf<
-    T,
-    TDefaults,
-    TUpdateDefaults,
-    TOutput,
-    TComputed,
-    TImmutable,
-    TDiscriminator
-  >,
+  Self extends RepoBase = RepoSelf<T, TDefaults, TUpdateDefaults, TOutput, TComputed, TImmutable>,
 > {
   // Concrete self-type (the `Self` reconstruction) exposed as a phantom so it
   // can be named when authoring an override. Base method signatures are written
@@ -207,7 +202,7 @@ export class Repo<
   declare readonly $def: ExtractTableDef<T>;
   declare readonly $computedAttributes: keyof TComputed;
   declare readonly $immutableAttributes: TImmutable;
-  declare readonly $discriminator: TDiscriminator;
+  declare readonly $discriminator: ExtractTableDiscriminator<T>;
 
   readonly table: T;
   readonly db: Db;
@@ -217,8 +212,7 @@ export class Repo<
     TUpdateDefaults,
     TOutput,
     TComputed,
-    TImmutable,
-    TDiscriminator
+    TImmutable
   >;
 
   constructor(
@@ -230,8 +224,7 @@ export class Repo<
       TUpdateDefaults,
       TOutput,
       TComputed,
-      TImmutable,
-      TDiscriminator
+      TImmutable
     >,
   ) {
     this.db = db;
@@ -712,7 +705,7 @@ export class Repo<
     keys: RepoKey<Self>[],
     options?: O & StrictOptions<O, RepoBatchGetOptions<Self>, Self["$schema"]>,
   ): Promise<RepoBatchGetResult<Self, O>> {
-    const { filter, parallel, maxStalls, baseDelay, chunkSize, ...restOptions } = (options ??
+    const { filter, parallel, maxAttempts, chunkSize, ...restOptions } = (options ??
       {}) as RepoBatchGetOptions<Self>;
     const { items, unprocessed } = await this.db.batchGet(
       {
@@ -722,7 +715,7 @@ export class Repo<
           ...restOptions,
         },
       } as any,
-      { parallel, maxStalls, baseDelay, chunkSize },
+      { parallel, maxAttempts, chunkSize },
     );
     const tableItems = items[this.tableName];
     return {
@@ -735,7 +728,7 @@ export class Repo<
     keys: RepoKey<Self>[],
     options?: O & StrictOptions<O, RepoBatchGetOptions<Self>, Self["$schema"]>,
   ): Promise<RepoBatchGetOrThrowResult<Self, O>> {
-    const { filter, parallel, maxStalls, baseDelay, chunkSize, ...restOptions } = (options ??
+    const { filter, parallel, maxAttempts, chunkSize, ...restOptions } = (options ??
       {}) as RepoBatchGetOptions<Self>;
     const result = await this.db.batchGetOrThrow(
       {
@@ -746,7 +739,7 @@ export class Repo<
           ...restOptions,
         },
       } as any,
-      { parallel, maxStalls, baseDelay, chunkSize },
+      { parallel, maxAttempts, chunkSize },
     );
     return this.applyTransformsIfNeeded(result[this.tableName] ?? [], options) as any;
   }
@@ -1162,7 +1155,7 @@ export class Repo<
     return result;
   }
 
-  // If the caller passed a key that carries the configured discriminator
+  // If the caller passed a key that carries the schema's discriminator
   // value, AND condition that field against the same value. Guards against the
   // row on the wire having a different variant than the type-level narrowing
   // assumed.
@@ -1170,7 +1163,7 @@ export class Repo<
     key: Obj,
     condition: Condition<ExtractTableSchema<T>> | undefined,
   ): Condition<ExtractTableSchema<T>> | undefined {
-    const discriminator = this.config.discriminator as string | undefined;
+    const discriminator = discriminatorOf(this.table.schema);
     if (!discriminator) return condition;
     const value = key[discriminator];
     if (value === undefined) return condition;
@@ -1207,9 +1200,8 @@ export interface MakeRepoResult<
   TOutput = ExtractTableSchema<T>,
   TComputed extends ValidComputedMap<ExtractTableSchema<T>, TComputed> = {},
   TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
-  TDiscriminator extends keyof ExtractTableSchema<T> = never,
 > {
-  new (db: Db): Repo<T, TDefaults, TUpdateDefaults, TOutput, TComputed, TImmutable, TDiscriminator>;
+  new (db: Db): Repo<T, TDefaults, TUpdateDefaults, TOutput, TComputed, TImmutable>;
   readonly table: T;
 }
 
@@ -1220,7 +1212,6 @@ export const makeRepo = <
   TOutput = ExtractTableSchema<T>,
   const TComputed extends ValidComputedMap<ExtractTableSchema<T>, TComputed> = {},
   const TImmutable extends AllKeys<ExtractTableSchema<T>> = never,
-  const TDiscriminator extends keyof ExtractTableSchema<T> = never,
 >(
   table: T,
   config?: RepoConfig<
@@ -1229,27 +1220,10 @@ export const makeRepo = <
     TUpdateDefaults,
     TOutput,
     TComputed,
-    TImmutable,
-    TDiscriminator
+    TImmutable
   >,
-): MakeRepoResult<
-  T,
-  TDefaults,
-  TUpdateDefaults,
-  TOutput,
-  TComputed,
-  TImmutable,
-  TDiscriminator
-> => {
-  return class extends Repo<
-    T,
-    TDefaults,
-    TUpdateDefaults,
-    TOutput,
-    TComputed,
-    TImmutable,
-    TDiscriminator
-  > {
+): MakeRepoResult<T, TDefaults, TUpdateDefaults, TOutput, TComputed, TImmutable> => {
+  return class extends Repo<T, TDefaults, TUpdateDefaults, TOutput, TComputed, TImmutable> {
     static readonly table = table;
     constructor(db: Db) {
       super(db, table, config);
