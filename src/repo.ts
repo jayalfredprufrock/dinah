@@ -21,6 +21,7 @@ import type {
   RepoKey,
   RepoPatchFn,
   RepoPatchInput,
+  RepoPatchFilterOptions,
   RepoPatchOptions,
   RepoPutOptions,
   RepoPutItem,
@@ -48,6 +49,8 @@ import type {
   RepoQueryGsiQuery,
   RepoQueryQuery,
   StrictOptions,
+  FilterOf,
+  NarrowByDiscriminator,
 } from "./repo.types";
 import type {
   AllKeys,
@@ -376,25 +379,31 @@ export class Repo<
    * When nothing changed, no write happens (so `defaultUpdateData` isn't
    * applied) and the current item is returned. A patch function must be pure,
    * since it can run more than once. Throws `NOT_FOUND` if the item doesn't
-   * exist — see {@link createOrPatch}.
+   * exist, or if it doesn't match `options.filter` — see {@link createOrPatch}.
    *
    * Prefer `update` when the change doesn't depend on the stored item: it's a
    * single round trip and its operators are atomic under contention.
    */
-  async patch<const K extends RepoKey<Self>>(
+  async patch<const K extends RepoKey<Self>, const O extends RepoPatchFilterOptions<Self> = {}>(
     key: K,
-    patch: RepoPatchInput<Self> | RepoPatchFn<Self>,
-    options?: RepoPatchOptions,
-  ): Promise<RepoUpdateResult<Self>> {
+    patch:
+      | RepoPatchInput<Self>
+      | ((
+          current: NarrowByDiscriminator<Self["$schema"], Self["$discriminator"], FilterOf<O>>,
+        ) => RepoPatchInput<Self>),
+    options?: O & StrictOptions<O, RepoPatchFilterOptions<Self>, Self["$schema"]>,
+  ): Promise<NarrowByDiscriminator<RepoUpdateResult<Self>, Self["$discriminator"], FilterOf<O>>> {
+    const filter = options?.filter as Obj | undefined;
     return this.withPatchRetries(options, async () => {
       const current = (await this.db.getOrThrow({
         table: this.tableName,
         key: this.extractKey(key),
         resource: this.resourceName,
         consistent: true,
+        filter,
       } as any)) as Obj;
       const input = typeof patch === "function" ? patch(current as any) : patch;
-      return this.writePatch(key as Obj, current, input as Obj);
+      return this.writePatch(key as Obj, current, input as Obj, filter) as any;
     });
   }
 
@@ -452,7 +461,12 @@ export class Repo<
     }
   }
 
-  private async writePatch(key: Obj, current: Obj, input: Obj): Promise<RepoUpdateResult<Self>> {
+  private async writePatch(
+    key: Obj,
+    current: Obj,
+    input: Obj,
+    filter?: Obj,
+  ): Promise<RepoUpdateResult<Self>> {
     const { transformAttributes, computedAttributes } = this.config;
     const { partitionKey, sortKey } = this.table.def;
     const keyFields = new Set<string>([partitionKey, sortKey].filter(Boolean) as string[]);
@@ -520,6 +534,7 @@ export class Repo<
         ...[...written].map((k) =>
           current[k] === undefined ? { [k]: { $exists: false } } : { [k]: { $eq: current[k] } },
         ),
+        ...Object.entries(filter ?? {}).map(([k, v]) => ({ [k]: { $eq: v } })),
       ],
     } as unknown as Condition<ExtractTableSchema<T>>;
 

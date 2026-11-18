@@ -1365,6 +1365,25 @@ describe("discriminator-narrowed update", () => {
     }
   });
 
+  test("patch narrows current and result by a discriminator filter", async () => {
+    const cat = await animalRepo.patch(
+      { id: "a1" },
+      (current) => {
+        expectTypeOf(current.meow).toEqualTypeOf<string>();
+        return { name: "x" };
+      },
+      { filter: { kind: "cat" } },
+    );
+    expectTypeOf(cat.meow).toEqualTypeOf<string>();
+    const any = await animalRepo.patch({ id: "a1" }, { name: "x" });
+    // @ts-expect-error — not narrowed without a filter
+    void any.meow;
+    // @ts-expect-error — "nope" is not a field
+    await animalRepo.patch({ id: "a1" }, { name: "x" }, { filter: { nope: 1 } });
+    // @ts-expect-error — unknown option
+    await animalRepo.patch({ id: "a1" }, { name: "x" }, { bogus: true });
+  });
+
   test("update rejects variant-specific field with wrong discriminator", async () => {
     // @ts-expect-error — "meow" is not on the dog variant
     await animalRepo.update({ id: "a1", kind: "dog" }, { meow: "loud" });

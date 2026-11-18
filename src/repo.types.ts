@@ -203,6 +203,15 @@ export interface RepoPatchOptions {
   maxAttempts?: number;
 }
 
+export interface RepoPatchFilterOptions<R extends RepoBase> extends RepoPatchOptions {
+  /**
+   * Fields the stored item must equal (as `get`'s `filter`), e.g. an owner id.
+   * An item that doesn't match throws `NOT_FOUND`. The match is also part of
+   * the write condition, so a retry rechecks it.
+   */
+  filter?: Partial<R["$schema"]>;
+}
+
 // delete ---------------------------------------------------------------------------------------------
 
 export interface RepoDeleteOptions<R extends RepoBase> {

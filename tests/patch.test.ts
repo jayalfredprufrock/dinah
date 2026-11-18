@@ -158,6 +158,31 @@ describe("patch", () => {
     expect(err.details.type).toBe("NOT_FOUND");
   });
 
+  test("filter: patches a matching item, NOT_FOUND otherwise", async () => {
+    await seed("pf1", { email: "owner@x.com" });
+    const result = await repo.patch(
+      { id: "pf1" },
+      { title: "new" },
+      { filter: { email: "owner@x.com" } },
+    );
+    expect(result.title).toBe("new");
+    const err = await repo
+      .patch({ id: "pf1" }, { title: "stolen" }, { filter: { email: "other@x.com" } })
+      .catch((e) => e);
+    expect(err.details.type).toBe("NOT_FOUND");
+    expect((await repo.get({ id: "pf1" })).title).toBe("new");
+  });
+
+  test("filter: rechecked when the item changes owner before the write", async () => {
+    await seed("pf2", { email: "owner@x.com" });
+    interceptNextWrite(() => repo.update({ id: "pf2" }, { email: "other@x.com" }));
+    const err = await repo
+      .patch({ id: "pf2" }, { title: "new" }, { filter: { email: "owner@x.com" } })
+      .catch((e) => e);
+    expect(err.details.type).toBe("NOT_FOUND");
+    expect((await repo.get({ id: "pf2" })).title).toBe("t");
+  });
+
   test("rejects a different key, allows the same one", async () => {
     await seed("p10");
     expect((await repo.patch({ id: "p10" }, { id: "p10" })).id).toBe("p10");

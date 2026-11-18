@@ -203,6 +203,12 @@ The write is conditioned on every written field still holding the value that was
 - A patch function must be pure: it can run more than once.
 - A missing item throws `NOT_FOUND`. Changing a key or immutable field throws `VALIDATION`.
 
+Pass `filter` to only patch an item whose fields match, as with `get`. A mismatch throws `NOT_FOUND`, and the match is part of the write condition, so it holds even under concurrent writes. This replaces a separate ownership lookup:
+
+```typescript
+await repo.patch({ surveyId }, body, { filter: { orgId } });
+```
+
 **HTTP PATCH bodies:** pass a decoded body straight to `patch`. A key present as `undefined` means "remove"; `update` throws on it by default (`updateUndefinedBehavior: "throw"`).
 
 ### Required fields can't be removed
