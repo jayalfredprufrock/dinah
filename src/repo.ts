@@ -60,7 +60,7 @@ import type {
 import { isOperation } from "./expression-builder";
 import { DinahError } from "./error";
 import { batchBackoffDelay } from "./batch";
-import { IsDiscriminatedUnion } from "./discriminated-union";
+import { IsDiscriminatedUnion, flattenVariants } from "./discriminated-union";
 import { deepEqual, matchesPartial } from "./util";
 
 const DEFAULT_PATCH_MAX_ATTEMPTS = 5;
@@ -320,7 +320,7 @@ export class Repo<
     update: RepoUpdateInputFor<Self, K>,
     options?: RepoUpdateOptions<Self>,
   ): Promise<RepoUpdateResult<Self>> {
-    const updateWithDefaults = this.applyNormalizersToExpression(update as Obj);
+    const updateWithDefaults = this.applyNormalizersToExpression(update as Obj, { key });
     const result = await this.db.update({
       table: this.tableName,
       key: this.extractKey(key),
@@ -527,7 +527,11 @@ export class Repo<
       table: this.tableName,
       key: this.extractKey(key as RepoKey<Self>),
       resource: this.resourceName,
-      update: this.applyNormalizersToExpression(update, preTransformed) as any,
+      update: this.applyNormalizersToExpression(update, {
+        preTransformed,
+        // The stored item names the variant unless the patch changes it.
+        key: { ...current, ...input },
+      }) as any,
       condition: this.withDiscriminatorCondition(key, condition),
     });
     return this.applyTransformIfNeeded(result);
@@ -821,7 +825,8 @@ export class Repo<
     update: RepoUpdateInput<Self>,
     options?: DbBatchOptions,
   ): Promise<RepoBatchUpdateResult<Self>> {
-    const updateWithDefaults = this.applyNormalizersToExpression(update as Obj);
+    this.assertNoRequiredRemovals(update as Obj, keys);
+    const updateWithDefaults = this.applyNormalizersToExpression(update as Obj, { guarded: true });
     const result = await this.db.batchUpdate(
       {
         [this.tableName]: {
@@ -968,7 +973,7 @@ export class Repo<
     update: RepoUpdateInputFor<Self, K>,
     options?: RepoUpdateOptions<Self>,
   ): DbTrxWriteRequest {
-    const updateWithDefaults = this.applyNormalizersToExpression(update as Obj);
+    const updateWithDefaults = this.applyNormalizersToExpression(update as Obj, { key });
     return {
       table: this.tableName,
       type: "UPDATE",
@@ -1039,8 +1044,24 @@ export class Repo<
 
   // `preTransformed` names fields whose values are already in stored form
   // (taken from a read), so `transformAttributes` must not run on them again.
-  private applyNormalizersToExpression(userUpdate: Obj, preTransformed?: Set<string>): Obj {
+  //
+  // `key` (or the item being patched) picks the variant when the table is a
+  // discriminated union; see `assertNoRequiredRemovals`.
+  private applyNormalizersToExpression(
+    userUpdate: Obj,
+    opts: { key?: Obj; preTransformed?: Set<string>; guarded?: boolean } = {},
+  ): Obj {
     const { transformAttributes, computedAttributes, immutableAttributes } = this.config;
+    const { preTransformed } = opts;
+
+    // Runs on the caller's update only: removals dinah adds below (computed
+    // fields, filled-in computed sources) are its own and always valid.
+    if (!opts.guarded) {
+      const own = preTransformed
+        ? Object.fromEntries(Object.entries(userUpdate).filter(([k]) => !preTransformed.has(k)))
+        : userUpdate;
+      this.assertNoRequiredRemovals(own, opts.key ? [opts.key] : []);
+    }
 
     if (computedAttributes) {
       for (const key of Object.keys(computedAttributes)) {
@@ -1154,6 +1175,64 @@ export class Repo<
     }
 
     return result;
+  }
+
+  // Required fields per discriminator value, plus `"*"`: fields required in
+  // every variant, used when the variant isn't known. Built once per repo.
+  private requiredFieldsCache?: Map<unknown, Set<string>>;
+  private get requiredFields(): Map<unknown, Set<string>> {
+    if (this.requiredFieldsCache) return this.requiredFieldsCache;
+    const schema = this.table.schema as Obj;
+    const variants = flattenVariants(schema as any) as Obj[];
+    const requiredOf = (v: Obj) => new Set<string>((v.required as string[] | undefined) ?? []);
+    const map = new Map<unknown, Set<string>>();
+    const all = variants.map(requiredOf);
+    map.set("*", new Set([...(all[0] ?? [])].filter((k) => all.every((r) => r.has(k)))));
+    if (IsDiscriminatedUnion(schema)) {
+      const d = schema.discriminator.propertyName;
+      variants.forEach((v, i) => {
+        const tag = (v.properties as Obj | undefined)?.[d]?.const;
+        if (tag !== undefined) map.set(tag, all[i]!);
+      });
+    }
+    return (this.requiredFieldsCache = map);
+  }
+
+  // Refuses to REMOVE a field the table schema requires, which would leave an
+  // invalid item. Covers top-level fields of repo writes; raw `Db` calls and
+  // nested paths (`a.b`) aren't checked. The variant comes from the update's
+  // discriminator if it sets one, else from each key/item; when unknown, only
+  // fields required in every variant count.
+  private assertNoRequiredRemovals(update: Obj, keys: Obj[]): void {
+    const removesUndefined = this.db.config?.updateUndefinedBehavior === "$remove";
+    const removed = Object.entries(update)
+      .filter(
+        ([, v]) => (v === undefined && removesUndefined) || (isOperation(v) && v.$remove === true),
+      )
+      .map(([k]) => k);
+    if (!removed.length) return;
+
+    const schema = this.table.schema;
+    const d = IsDiscriminatedUnion(schema) ? schema.discriminator.propertyName : undefined;
+    const tagOf = (v: unknown) => (isOperation(v) ? (v.$set ?? v.$literal) : v);
+    const fromUpdate = d === undefined ? undefined : tagOf(update[d]);
+    const tags =
+      fromUpdate !== undefined
+        ? [fromUpdate]
+        : keys.length
+          ? keys.map((k) => (d === undefined ? undefined : k[d]))
+          : [undefined];
+
+    for (const tag of new Set(tags)) {
+      const required = this.requiredFields.get(tag ?? "*") ?? this.requiredFields.get("*")!;
+      const field = removed.find((k) => required.has(k));
+      if (field !== undefined) {
+        throw new DinahError({
+          type: "VALIDATION",
+          message: `Field "${field}" is required by the table schema and cannot be removed.`,
+        });
+      }
+    }
   }
 
   // If the caller passed a key that carries the schema's discriminator

@@ -203,6 +203,12 @@ The write is conditioned on every written field still holding the value that was
 - A patch function must be pure: it can run more than once.
 - A missing item throws `NOT_FOUND`. Changing a key or immutable field throws `VALIDATION`.
 
+**HTTP PATCH bodies:** pass a decoded body straight to `patch`. A key present as `undefined` means "remove"; `update` throws on it by default (`updateUndefinedBehavior: "throw"`).
+
+### Required fields can't be removed
+
+Every repo write (`patch`, `createOrPatch`, `update`, `batchUpdate`, `trxUpdateRequest`) throws `VALIDATION` before sending anything if it would remove a field the table schema requires, whether through `undefined` or `{ $remove: true }`. For a discriminated union, the variant comes from the update's discriminator if it sets one, else from the stored item (`patch`) or the key; when the variant is unknown, only fields every variant requires are protected. Only top-level fields are checked, and raw `Db` calls aren't, so they remain an escape hatch.
+
 `repo.createOrPatch(item, update?)` creates `item` if its key doesn't exist, otherwise patches the existing item with `update(current)`, or with `item` itself if no function is given. Fields `item` doesn't mention, like `createdAt` from `defaultCreateData`, are left alone.
 
 **`update` or `patch`?** If you can write the change without reading first, use `update`: it's one round trip, and its operators are atomic under contention. Use `patch` when the new values depend on the stored item, or when writing a set of fields that may already match. Avoid `patch` on hot items, where contention just turns into retries.
